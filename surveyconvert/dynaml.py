@@ -8,16 +8,22 @@ https://github.com/icsm-au/DynAdjust/blob/master/resources/DynAdjust%20Users%20G
 """
 
 
-def dnaxmlstnroot():
+def dnaxmlroot(dnaxmlformattype):
     """
-    Create Empty DynaML stn header and lxml container object
+    Create Empty DynaML header for either Station or Measurement File as lxml container object
+    :param dnaxmlformattype: Either 'stn' or 'msr'
     :return: lxml.etree Element Object
     """
-    # Define Root Object, Add Components
+    if dnaxmlformattype == 'stn':
+        formattext = 'Station File'
+    elif dnaxmlformattype == 'msr':
+        formattext = 'Measurement File'
+    else:
+        raise ValueError("ValueError: dnaxmlformattype must be either 'stn' or 'msr'")
     NS = 'http://www.w3.org/2001/XMLSchema-instance'
     location_attribute = '{%s}noNameSpaceSchemaLocation' % NS
     dnaxmlroot = ET.Element('DnaXmlFormat', attrib={location_attribute: 'DynaML.xsd'})
-    dnaxmlroot.set('type', 'Station File')
+    dnaxmlroot.set('type', formattext)
     return dnaxmlroot
 
 
@@ -69,9 +75,63 @@ def addstnrecord(dnaxmlroot, name, constraint, coordtype, xaxis, yaxis, height, 
 
     return dnaxmlroot
 
-# Test
+
+def addgnssbaseline(dnaxmlroot, refframe, epoch, scale, firststn, secondstn,
+                    x, y, z, sxx, sxy, sxz, syy, syz, szz):
+    # Define DnaMeasurement
+    dnamsr = ET.SubElement(dnaxmlroot, 'DnaMeasurement')
+
+    # Create DnaMeasurement Subelements
+    msrtype = ET.SubElement(dnamsr, 'Type')
+    msrrefframe = ET.SubElement(dnamsr, 'ReferenceFrame')
+    msrepoch = ET.SubElement(dnamsr, 'Epoch')
+    msrvscale = ET.SubElement(dnamsr, 'Vscale')
+    msrpscale = ET.SubElement(dnamsr, 'Pscale')
+    msrlscale = ET.SubElement(dnamsr, 'Lscale')
+    msrhscale = ET.SubElement(dnamsr, 'Hscale')
+    msrfirststn = ET.SubElement(dnamsr, 'First')
+    msrsecondstn = ET.SubElement(dnamsr, 'Second')
+
+    # Populate DnaMeasurement Subelements
+    msrtype.text = 'G'
+    msrrefframe.text = refframe
+    msrepoch.text = epoch
+    msrvscale.text = scale
+    msrpscale.text = scale
+    msrlscale.text = scale
+    msrhscale.text = scale
+    msrfirststn.text = firststn
+    msrsecondstn.text = secondstn
+
+    # Create DnaMeasurement GPSBaseline and Subelements
+    gpsbaseline = ET.SubElement(dnamsr, 'GPSBaseline')
+    msrx = ET.SubElement(gpsbaseline, 'X')
+    msry = ET.SubElement(gpsbaseline, 'Y')
+    msrz = ET.SubElement(gpsbaseline, 'Z')
+    msrsxx = ET.SubElement(gpsbaseline, 'SigmaXX')
+    msrsxy = ET.SubElement(gpsbaseline, 'SigmaXY')
+    msrsxz = ET.SubElement(gpsbaseline, 'SigmaXZ')
+    msrsyy = ET.SubElement(gpsbaseline, 'SigmaYY')
+    msrsyz = ET.SubElement(gpsbaseline, 'SigmaYZ')
+    msrszz = ET.SubElement(gpsbaseline, 'SigmaZZ')
+
+    # Populate GPSBaseline Subelements
+    msrx.text = x
+    msry.text = y
+    msrz.text = z
+    msrsxx.text = sxx
+    msrsxy.text = sxy
+    msrsxz.text = sxz
+    msrsyy.text = syy
+    msrsyz.text = syz
+    msrszz.text = szz
+
+    return dnaxmlroot
+
+
+# Test Station File Creation
 # from surveyconvert.dynaml import *
-# root = dnaxmlstnroot()
+# root = dnaxmlroot('stn')
 # root = addstnrecord(root,
 #                     '317701630', 'FFF', 'LLH',
 #                     '-36.24390312756', '145.14382243848', '121.7653', 'S55',
