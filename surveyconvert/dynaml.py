@@ -69,8 +69,15 @@ def addstnrecord(dnaxmlroot, name, constraint, coordtype, xaxis, yaxis, height, 
 
     return dnaxmlroot
 
-# Output XML data to byte string
-# mydata = ET.tostring(dnaxmlroot, pretty_print='True', xml_declaration='True', encoding='utf-8')
+# Test
+# from surveyconvert.dynaml import *
+# root = dnaxmlstnroot()
+# root = addstnrecord(root,
+#                     '317701630', 'FFF', 'LLH',
+#                     '-36.24390312756', '145.14382243848', '121.7653', 'S55',
+#                     '317701630, ?, ?')
+# mydata = ET.tostring(root, pretty_print='True', xml_declaration='True', encoding='utf-8')
+# print(mydata)
 
 # Write byte string to file
 # with open('testdnastn.xml', 'wb') as myfile:
