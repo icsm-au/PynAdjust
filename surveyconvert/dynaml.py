@@ -1,5 +1,6 @@
 import lxml.etree as ET
 
+
 """
 For information about DynaML schema definition, see DynAdjust Users Guide Appendix B.3
 
@@ -29,7 +30,7 @@ def dnaxmlroot(dnaxmlformattype):
 
 def addstnrecord(dnaxmlroot, name, constraint, coordtype, xaxis, yaxis, height, hemi_zone, desc):
     """
-    Add DynaML Station Record to existing lxml.etree Element Object (using dnaxmlstnroot above)
+    Add DynaML Station Record to existing lxml.etree Element Object (using dnaxmlroot above)
     :param dnaxmlroot: lxml.etree Element Object
     :param name: Station Name, text
     :param constraint: Station Constraint ('FFF' or 'CCC'), text
@@ -76,8 +77,30 @@ def addstnrecord(dnaxmlroot, name, constraint, coordtype, xaxis, yaxis, height, 
     return dnaxmlroot
 
 
-def addgnssbaseline(dnaxmlroot, refframe, epoch, scale, firststn, secondstn,
+def addgnssbaseline(dnaxmlroot, refframe, epoch, vscale, pscale, lscale, hscale, firststn, secondstn,
                     x, y, z, sxx, sxy, sxz, syy, syz, szz):
+    """
+    Add DynaML Measurement Record to existing lxml.etree Element Object (using dnaxmlroot above)
+    :param dnaxmlroot: lxml.etree Element Object
+    :param refframe: Reference Frame, text
+    :param epoch: Epoch, text
+    :param vscale: Variance Matrix Scalar, text
+    :param pscale: P Scaler, text
+    :param lscale: L Scalar, text
+    :param hscale: Height Scalar, text
+    :param firststn: First Station, text
+    :param secondstn: Second Station, text
+    :param x: Delta-X, text
+    :param y: Delta-Y, text
+    :param z: Delta-Z, text
+    :param sxx: Variance-Covariance Matrix Component, text
+    :param sxy: Variance-Covariance Matrix Component, text
+    :param sxz: Variance-Covariance Matrix Component, text
+    :param syy: Variance-Covariance Matrix Component, text
+    :param syz: Variance-Covariance Matrix Component, text
+    :param szz: Variance-Covariance Matrix Component, text
+    :return: lxml.etree Element Object with new Measurement Record added
+    """
     # Define DnaMeasurement
     dnamsr = ET.SubElement(dnaxmlroot, 'DnaMeasurement')
 
@@ -96,10 +119,10 @@ def addgnssbaseline(dnaxmlroot, refframe, epoch, scale, firststn, secondstn,
     msrtype.text = 'G'
     msrrefframe.text = refframe
     msrepoch.text = epoch
-    msrvscale.text = scale
-    msrpscale.text = scale
-    msrlscale.text = scale
-    msrhscale.text = scale
+    msrvscale.text = vscale
+    msrpscale.text = pscale
+    msrlscale.text = lscale
+    msrhscale.text = hscale
     msrfirststn.text = firststn
     msrsecondstn.text = secondstn
 
