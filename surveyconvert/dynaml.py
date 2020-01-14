@@ -84,10 +84,10 @@ def addgnssbaseline(dnaxmlroot, refframe, epoch, vscale, pscale, lscale, hscale,
     :param dnaxmlroot: lxml.etree Element Object
     :param refframe: Reference Frame, text
     :param epoch: Epoch, text
-    :param vscale: Variance Matrix Scalar, text
-    :param pscale: P Scaler, text
-    :param lscale: L Scalar, text
-    :param hscale: Height Scalar, text
+    :param vscale: Whole of Variance Matrix Scalar, text
+    :param pscale: North-South Variance Matrix Scalar, text
+    :param lscale: East-West Variance Matrix Scalar, text
+    :param hscale: Vertical Variance Matrix Scalar, text
     :param firststn: First Station, text
     :param secondstn: Second Station, text
     :param x: Delta-X, text
