@@ -1,12 +1,17 @@
-import lxml.etree as ET
-
+#!/usr/bin/env python3
 
 """
+PynAdjust - Survey Convert - DynaML Module
+Author - Josh Batchelor
+Purpose - To provide functionality to enable conversion of data to DynaML format
+
 For information about DynaML schema definition, see DynAdjust Users Guide Appendix B.3
 
 DynAdjust Users Guide available here:
 https://github.com/icsm-au/DynAdjust/blob/master/resources/DynAdjust%20Users%20Guide.pdf
 """
+
+import lxml.etree as ET
 
 
 def dnaxmlroot(dnaxmlformattype):

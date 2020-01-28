@@ -1,3 +1,16 @@
+#!/usr/bin/env python3
+
+"""
+PynAdjust - Survey Convert - Trimble Data Exchange Format (TDEF) Module
+Author - Josh Batchelor
+Purpose - To provide functionality to enable conversion of TDEF GNSS data to DynaML format
+
+For information about DynaML schema definition, see DynAdjust Users Guide Appendix B.3
+
+DynAdjust Users Guide available here:
+https://github.com/icsm-au/DynAdjust/blob/master/resources/DynAdjust%20Users%20Guide.pdf
+"""
+
 import os
 import lxml.etree as ET
 from geodepy.convert import dec2hp
@@ -76,6 +89,7 @@ def msr2xml(tdeffile):
                                   x, y, z, sxx, sxy, sxz, syy, syz, szz)
 
     return msrroot
+
 
 if __name__ == "__main__":
     tdeffile = os.sys.argv[1]
