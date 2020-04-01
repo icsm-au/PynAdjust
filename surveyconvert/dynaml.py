@@ -87,23 +87,23 @@ def addgnssbaseline(dnaxmlroot, refframe, epoch, vscale, pscale, lscale, hscale,
     """
     Add DynaML Measurement Record to existing lxml.etree Element Object (using dnaxmlroot above)
     :param dnaxmlroot: lxml.etree Element Object
-    :param refframe: Reference Frame, text
-    :param epoch: Epoch, text
-    :param vscale: Whole of Variance Matrix Scalar, text
-    :param pscale: North-South Variance Matrix Scalar, text
-    :param lscale: East-West Variance Matrix Scalar, text
-    :param hscale: Vertical Variance Matrix Scalar, text
-    :param firststn: First Station, text
-    :param secondstn: Second Station, text
-    :param x: Delta-X, text
-    :param y: Delta-Y, text
-    :param z: Delta-Z, text
-    :param sxx: Variance-Covariance Matrix Component, text
-    :param sxy: Variance-Covariance Matrix Component, text
-    :param sxz: Variance-Covariance Matrix Component, text
-    :param syy: Variance-Covariance Matrix Component, text
-    :param syz: Variance-Covariance Matrix Component, text
-    :param szz: Variance-Covariance Matrix Component, text
+    :param refframe: Reference Frame, str
+    :param epoch: Epoch, str
+    :param vscale: Whole of Variance Matrix Scalar, str
+    :param pscale: North-South Variance Matrix Scalar, str
+    :param lscale: East-West Variance Matrix Scalar, str
+    :param hscale: Vertical Variance Matrix Scalar, str
+    :param firststn: First Station, str
+    :param secondstn: Second Station, str
+    :param x: Delta-X, str
+    :param y: Delta-Y, str
+    :param z: Delta-Z, str
+    :param sxx: Variance-Covariance Matrix Component, str
+    :param sxy: Variance-Covariance Matrix Component, str
+    :param sxz: Variance-Covariance Matrix Component, str
+    :param syy: Variance-Covariance Matrix Component, str
+    :param syz: Variance-Covariance Matrix Component, str
+    :param szz: Variance-Covariance Matrix Component, str
     :return: lxml.etree Element Object with new Measurement Record added
     """
     # Define DnaMeasurement

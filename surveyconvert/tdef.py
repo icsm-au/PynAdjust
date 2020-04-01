@@ -16,8 +16,6 @@ import lxml.etree as ET
 from geodepy.convert import dec2hp
 from surveyconvert.dynaml import dnaxmlroot, addstnrecord, addgnssbaseline
 
-# Example 'C:\\Users\\jb6t\\PycharmProjects\\Pynadjust\\resources\\20191217_Myrtleford.asc'
-
 
 def stn2xml(tdeffile):
     # Read tdef Projection Zone
