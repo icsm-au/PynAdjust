@@ -14,7 +14,7 @@ https://github.com/icsm-au/DynAdjust/blob/master/resources/DynAdjust%20Users%20G
 import os
 import lxml.etree as ET
 from geodepy.convert import dec2hp
-from surveyconvert.dynaml import dnaxmlroot, addstnrecord, addgnssbaseline
+from pynadjust.surveyconvert.dynaml import dnaxmlroot, addstnrecord, addgnssbaseline
 
 
 def stn2xml(tdeffile):
