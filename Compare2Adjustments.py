@@ -6,11 +6,20 @@
 # Purpose:  Script to create stn/msr shapefiles from DynAdjust .adj file
 # ----------------------------------------------------------------------
 #   Usage:  cmd:\> python Compare2Adjustments.py <*.adj_file1> <*.adj_file2>
+#           Or
+#           cmd:\> python Compare2Adjustments.py <*.adj_file1>
 # ----------------------------------------------------------------------
-#   Notes:  - Currently handles msr types BDEGHLMRXY. Other types are ignored.
+#   Notes:  - Currently handles the following msr types and produces these shp files
+#                         Azimuths_TYPE_B_K_V_Z
+#                         Angles_TYPE_D_A
+#                         Distances_TYPE_C_E_M_S
+#                         GNSS_TYPE_G_X_Y
+#                         Height_Diff_TYPE_L
+#                         Heights_TYPE_H_R
+#                         Astro_TYPE_P_Q_I_J
+#                          Other types are ignored.
 #           - GDA2020 and GDA94 reference frames are supported.
 #           - angular_msr_types are required to be in the same format in each file
-#           - requires the adj and apu files to located in the same directory
 #
 
 import os, sys,sqlite3
@@ -26,28 +35,6 @@ MAX_ITERATIONS = 200
 CONVERGENCE_THRESHOLD = 1e-12  # .000,000,000,001
 
 def vincenty_inverse(point1, point2, miles=False):
-    """
-    Vincenty's formula (inverse method) to calculate the distance (in
-    kilometers or miles) between two points on the surface of a spheroid
-
-    Doctests:
-    >>> vincenty((0.0, 0.0), (0.0, 0.0))  # coincident points
-    0.0
-    >>> vincenty((0.0, 0.0), (0.0, 1.0))
-    111.319491
-    >>> vincenty((0.0, 0.0), (1.0, 0.0))
-    110.574389
-    >>> vincenty((0.0, 0.0), (0.5, 179.5))  # slow convergence
-    19936.288579
-    >>> vincenty((0.0, 0.0), (0.5, 179.7))  # failure to converge
-    >>> boston = (42.3541165, -71.0693514)
-    >>> newyork = (40.7791472, -73.9680804)
-    >>> vincenty(boston, newyork)
-    298.396057
-    >>> vincenty(boston, newyork, miles=True)
-    185.414657
-    """
-
     # short-circuit coincident points
     if point1[0] == point2[0] and point1[1] == point2[1]:
         return [0.0,0.0]
@@ -144,9 +131,10 @@ def hms2dd(HMS_Ang):
 ######################## Compare two adjustments ##############################
 ###############################################################################
 
-adj_file1 ='gda2020_20200301.phased-stage.adj'
-adj_file2 ='20200305_(05)_WA_NT_SA_GDA2020.phased-stage.adj'
-if len(sys.argv) >1: adj_file1 =sys.argv[1]; adj_file2 =sys.argv[2]
+adj_file1 ='20200320_(03)_WA_GDA2020.phased-stage.adj'
+adj_file2 ='20200330_(03)_WA_GDA2020.phased-stage.adj'
+if len(sys.argv)==2: adj_file1=sys.argv[1]; adj_file2 =sys.argv[1]
+if len(sys.argv)==3: adj_file1=sys.argv[1]; adj_file2 =sys.argv[2]
 adj_files=[adj_file1,adj_file2]
 
 apu_file1 = adj_file1.replace('.adj','_typeB.apu') if os.path.isfile(adj_file1.replace('.adj','_typeB.apu')) else adj_file1.replace('.adj','.apu')
@@ -320,25 +308,26 @@ for fn in apu_files:
     print (fn)
     count_lines=0; file_count=file_count +1
     read_coords = 'false'
-    with open(fn, 'r') as file:
-        dnadata = file.readlines()
-        for line in dnadata:
-            if line.find('Positional uncertainty of adjusted station coordinates')!=-1:
-                read_coords = 'true'
-                count_lines=0
-            if read_coords =='true' and count_lines>=5 and len(line)>1:
-                if line[0:20]!='                    ':
-                    pointid = line[0:20]
-                    lat = float(line[20:37])
-                    long = float(line[37:52])
-                    Hz_PU= float(line[52:63])
-                    Vt_PU= float(line[63:74])
-                    S_Maj= float(line[74:87])
-                    S_Min= float(line[87:100])
-                    Orien= float(line[100:113])
-                cursor.execute("INSERT OR REPLACE INTO APU" + str(file_count) + "_POINTS (ID, STATION, LATITUDE, LONGITUDE, Hz_PosU, Vt_PosU, Semi_major, Semi_minor, Orientation) VALUES (?,?,?,?,?,?,?,?,?)", 
-                                [count_lines, pointid.strip(), hp2dec(lat),hp2dec(long), Hz_PU, Vt_PU, S_Maj, S_Min, Orien])
-            count_lines = count_lines + 1
+    if os.path.exists(fn):
+        with open(fn, 'r') as file:
+            dnadata = file.readlines()
+            for line in dnadata:
+                if line.find('Positional uncertainty of adjusted station coordinates')!=-1:
+                    read_coords = 'true'
+                    count_lines=0
+                if read_coords =='true' and count_lines>=5 and len(line)>1:
+                    if line[0:20]!='                    ':
+                        pointid = line[0:20]
+                        lat = float(line[20:37])
+                        long = float(line[37:52])
+                        Hz_PU= float(line[52:63])
+                        Vt_PU= float(line[63:74])
+                        S_Maj= float(line[74:87])
+                        S_Min= float(line[87:100])
+                        Orien= float(line[100:113])
+                    cursor.execute("INSERT OR REPLACE INTO APU" + str(file_count) + "_POINTS (ID, STATION, LATITUDE, LONGITUDE, Hz_PosU, Vt_PosU, Semi_major, Semi_minor, Orientation) VALUES (?,?,?,?,?,?,?,?,?)", 
+                                    [count_lines, pointid.strip(), hp2dec(lat),hp2dec(long), Hz_PU, Vt_PU, S_Maj, S_Min, Orien])
+                count_lines = count_lines + 1
 conn.commit()
             
 print ('Now creating an index on tables .....')
@@ -375,6 +364,10 @@ shp_fn.append("GNSS_TYPE_G_X_Y")
 shp_sql.append("SELECT ADJ2_MEASUREMENTS.*, ADJ2_POINTS.LATITUDE, ADJ2_POINTS.LONGITUDE, ADJ2_POINTS_1.LATITUDE, ADJ2_POINTS_1.LONGITUDE, ADJ2_POINTS_2.LATITUDE, ADJ2_POINTS_2.LONGITUDE \
                     FROM ((ADJ2_MEASUREMENTS LEFT JOIN ADJ2_POINTS ON ADJ2_MEASUREMENTS.STN1 = ADJ2_POINTS.STATION) LEFT JOIN ADJ2_POINTS AS ADJ2_POINTS_1 ON ADJ2_MEASUREMENTS.STN2 = ADJ2_POINTS_1.STATION) LEFT JOIN ADJ2_POINTS AS ADJ2_POINTS_2 ON ADJ2_MEASUREMENTS.STN3 = ADJ2_POINTS_2.STATION \
                     WHERE (((ADJ2_MEASUREMENTS.MEAS_TYPE)='G' Or (ADJ2_MEASUREMENTS.MEAS_TYPE)='X' Or (ADJ2_MEASUREMENTS.MEAS_TYPE)='Y'));")
+shp_fn.append("Height_Diff_TYPE_L")
+shp_sql.append("SELECT ADJ2_MEASUREMENTS.*, ADJ2_POINTS.LATITUDE, ADJ2_POINTS.LONGITUDE, ADJ2_POINTS_1.LATITUDE, ADJ2_POINTS_1.LONGITUDE, ADJ2_POINTS_2.LATITUDE, ADJ2_POINTS_2.LONGITUDE \
+                    FROM ((ADJ2_MEASUREMENTS LEFT JOIN ADJ2_POINTS ON ADJ2_MEASUREMENTS.STN1 = ADJ2_POINTS.STATION) LEFT JOIN ADJ2_POINTS AS ADJ2_POINTS_1 ON ADJ2_MEASUREMENTS.STN2 = ADJ2_POINTS_1.STATION) LEFT JOIN ADJ2_POINTS AS ADJ2_POINTS_2 ON ADJ2_MEASUREMENTS.STN3 = ADJ2_POINTS_2.STATION \
+                    WHERE (((ADJ2_MEASUREMENTS.MEAS_TYPE)='L'));")
 shp_fn.append("Heights_TYPE_H_R")
 shp_sql.append("SELECT ADJ2_MEASUREMENTS.*, ADJ2_POINTS.LATITUDE, ADJ2_POINTS.LONGITUDE, ADJ2_POINTS_1.LATITUDE, ADJ2_POINTS_1.LONGITUDE, ADJ2_POINTS_2.LATITUDE, ADJ2_POINTS_2.LONGITUDE \
                     FROM ((ADJ2_MEASUREMENTS LEFT JOIN ADJ2_POINTS ON ADJ2_MEASUREMENTS.STN1 = ADJ2_POINTS.STATION) LEFT JOIN ADJ2_POINTS AS ADJ2_POINTS_1 ON ADJ2_MEASUREMENTS.STN2 = ADJ2_POINTS_1.STATION) LEFT JOIN ADJ2_POINTS AS ADJ2_POINTS_2 ON ADJ2_MEASUREMENTS.STN3 = ADJ2_POINTS_2.STATION \
@@ -465,8 +458,10 @@ for row in qry:
     Mag_Vt_Chg=None
     Mag_vPU_Chg=None
     PER_Vt_v_vPU=None
-    if row[11]is not None and row[16]is not None and row[11]!=0:
+    if row[7]is not None and row[3]is not None and row[10]is not None and row[6]is not None:
         Mag_Coord_Chg=vincenty_inverse((row[7], row[8]),(row[3], row[4]))
+        Mag_Vt_Chg=row[10]-row[6]
+    if row[11]is not None and row[16]is not None and row[11]!=0:
         Mag_PU_Chg=row[16]-row[11]
         PER_Coord_v_PU=round((Mag_Coord_Chg[0]/row[11])*100,2)
         PER_PU_v_PU=round((Mag_PU_Chg/row[11])*100,2)
