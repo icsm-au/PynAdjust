@@ -27,7 +27,7 @@ def dnaxmlroot(dnaxmlformattype):
     else:
         raise ValueError("ValueError: dnaxmlformattype must be either 'stn' or 'msr'")
     NS = 'http://www.w3.org/2001/XMLSchema-instance'
-    location_attribute = '{%s}noNameSpaceSchemaLocation' % NS
+    location_attribute = '{%s}noNamespaceSchemaLocation' % NS
     dnaxmlroot = ET.Element('DnaXmlFormat', attrib={location_attribute: 'DynaML.xsd'})
     dnaxmlroot.set('type', formattext)
     return dnaxmlroot
