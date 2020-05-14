@@ -186,8 +186,8 @@ def Msr_xml_str(row,re_scale=1):
     Msr.value=Msr.value.split(',')
     Msr.targets=Msr.targets.split(',')
     Msr.targetstddevs=Msr.targetstddevs.split(',')
-    if Msr.vscale!='': Msr.vscale=str(sqrt(float(Msr.vscale)*sqrt(re_scale))**2)
-    if Msr.stddev!='':Msr.stddev=str(float(row[9])*sqrt(re_scale))
+    if Msr.vscale!='': Msr.vscale=str(sqrt(float(Msr.vscale)*sqrt(abs(re_scale)))**2)
+    if Msr.stddev!='':Msr.stddev=str(float(row[9])*sqrt(abs(re_scale)))
     if Msr.targetstddevs!='':
         for i in range(1,len(Msr.targetstddevs)):
             Msr.targetstddevs[i]=str(float(Msr.targetstddevs[i])*sqrt(re_scale))
@@ -423,7 +423,7 @@ def GNSSdate2Ref(obsDate):
     return Ref
 #################################################################################
 
-adjustment_name = 'GPS_1_Horizontal_Analysis'
+adjustment_name = '20012405_3_Final_Adjustment'
 if len(sys.argv) >1: adjustment_name = sys.argv[1].replace('.iob','')
 
 def create_connection(db_file):
