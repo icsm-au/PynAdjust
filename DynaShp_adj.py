@@ -1,5 +1,5 @@
 # ----------------------------------------------------------------------
-#                          DynaShp.py
+#                          DynaShp_adj.py
 # ----------------------------------------------------------------------
 #  Author:  Nicholas Gowans
 #    Date:  05 February 2020
@@ -7,7 +7,8 @@
 # ----------------------------------------------------------------------
 #   Usage:  cmd:\> python DynaShp_adj.py <*.adj_file>
 # ----------------------------------------------------------------------
-#   Notes:  - Requires coordinates to be in form ENzPLHhXYZ
+#   Notes:  - Requires coordinate types PLHh. Grid coordinates are computed
+#             if absent.
 #           - Currently handles msr types BDEGHLMRXY. Other types are ignored.
 #           - GDA2020 and GDA94 reference frames are supported. Others are
 #             written as datum-less.
@@ -17,6 +18,11 @@
 #               - Introduce additional epsg codes for other reference frames
 #               - Handle variable coordinate formats
 #               - Introduce functions for shapefile writes (not one per msr type)
+# ----------------------------------------------------------------------
+#  Update:  02 June 2020
+#           - Script updated to better detect start of measurements/stations
+#           - Station read works with variable coordinate types.
+#             Minimum required coord types are PLHh
 # ----------------------------------------------------------------------
 
 import geodepy.convert as gc
@@ -60,6 +66,12 @@ y_msr_name = short + '_y'
 
 msr_switch = False
 stn_switch = False
+msr_line = None
+stn_line = None
+line_count = 0
+
+mandatory_coord_types = 'PLHh'
+
 l_count = 0
 h_count = 0
 r_count = 0
@@ -89,33 +101,45 @@ stns = {}
 # read adj results
 # ----------------------------------------------------------------------
 
-adj_fh = open(adj_file,'r')
+adj_fh = open(adj_file, 'r')
 
 print(" reading adj results ...")
 
 for line in adj_fh:
+    line_count += 1
 
-    if line.strip() == '-'*228:
-        msr_switch = True
-        continue
+    if 'Adjusted Measurements' in line:
+        msr_line = line_count + 5
 
-    if line.strip() == '-'*248:
-        stn_switch = True
-        continue
+    if msr_line:
+        if line_count == msr_line:
+            msr_switch = True
+
+    if 'Adjusted Coordinates' in line:
+        stn_line = line_count + 5
+
+    if stn_line:
+        if line_count == stn_line:
+            stn_switch = True
 
     if line[:35] == 'Reference frame:                   ':
         ref_frame = line[35:].strip()
 
     if line[:35] == 'Station coordinate types:          ':
         coord_types = line[35:].strip()
-        if coord_types != 'ENzPLHhXYZ':
-            print('\n ERROR!\n\n Coordinate types must be in form ENzPLHhXYZ\n\n Exiting...')
-            exit()
+        for l in mandatory_coord_types:
+            if l not in coord_types:
+                print('*' * 20)
+                print(' Warning! Mandatory coordinate types not present in {:s}'.format(adj_file))
+                print(' .adj file must contain coord types PLHh')
+                print('')
+                print('Exiting...')
+                exit()
 
-    if(msr_switch):
+    if msr_switch:
         msrType = line[0:1]
 
-        if msrType =='L':
+        if msrType == 'L':
             l_count += 1
             station1 = line[2:22].strip()
             station2 = line[22:42].strip()
@@ -145,7 +169,7 @@ for line in adj_fh:
 
             continue
 
-        if msrType =='B':
+        if msrType == 'B':
             b_count += 1
             station1 = line[2:22].strip()
             station2 = line[22:42].strip()
@@ -175,7 +199,7 @@ for line in adj_fh:
 
             continue
 
-        if msrType =='E':
+        if msrType == 'E':
             e_count += 1
             station1 = line[2:22].strip()
             station2 = line[22:42].strip()
@@ -205,7 +229,7 @@ for line in adj_fh:
 
             continue
 
-        if msrType =='M':
+        if msrType == 'M':
             m_count += 1
             station1 = line[2:22].strip()
             station2 = line[22:42].strip()
@@ -408,7 +432,6 @@ for line in adj_fh:
                 y_PreAdjCor = []
                 y_Outlier = []
 
-
             y_msr.append(data[0])
             y_adj.append(data[1])
             y_cor.append(float(data[2]))
@@ -517,7 +540,7 @@ for line in adj_fh:
         
         if msrType == 'D':
             output = []
-            d_set +=1
+            d_set += 1
             pointing = 0
             station1 = line[2:22].strip()
             station2 = line[22:42].strip()
@@ -560,33 +583,72 @@ for line in adj_fh:
             msr_switch = False
             continue
         
-    if(stn_switch):
+    if stn_switch:
         if len(line) < 20:
             stn_switch = False
             continue
 
+        E = None
+        N = None
+        z = None
+        P = None
+        L = None
+        H = None
+        h = None
+        # Cartesian coords disabled for now
+        # X = None
+        # Y = None
+        # Z = None
+
         stn = line[0:20].strip()
         con = line[20:23]
-        east = float(line[28:39])
-        north = float(line[40:54])
-        zone = int(line[60:62])
-        lat = gc.hp2dec(float(line[62:76]))
-        lon = gc.hp2dec(float(line[77:91]))
-        OHGT = float(line[91:102])
-        EHGT = float(line[102:113])
-        SD_E = float(line[161:170])
-        SD_N = float(line[170:180])
-        SD_U = float(line[180:190])
+        results = line[25:].split()
+        r_count = 0
+
+        for ct in coord_types:
+            if ct == 'E':
+                E = float(results[r_count])
+            if ct == 'N':
+                N = float(results[r_count])
+            if ct == 'z':
+                z = int(results[r_count])
+            if ct == 'P':
+                P = gc.hp2dec(float(results[r_count]))
+            if ct == 'L':
+                L = gc.hp2dec(float(results[r_count]))
+            if ct == 'H':
+                H = float(results[r_count])
+            if ct == 'h':
+                h = float(results[r_count])
+            # if ct == 'X':
+            #     X = float(results[r_count])
+            # if ct == 'Y':
+            #     Y = float(results[r_count])
+            # if ct == 'Z':
+            #     Z = float(results[r_count])
+
+            r_count += 1
+
+        # Don't forget about the qualities
+        SD_E = float(results[r_count])
+        SD_N = float(results[r_count + 1])
+        SD_U = float(results[r_count + 2])
+
+        if not E:
+            ENz = gc.geo2grid(P, L)
+            E = ENz[2]
+            N = ENz[3]
+            z = ENz[1]
 
         stns[stn] = {
-            'con':con,
-            'E': east,
-            'N': north,
-            'Z': zone,
-            'P': lat,
-            'L': lon,
-            'H': OHGT,
-            'h': EHGT,
+            'con': con,
+            'E': E,
+            'N': N,
+            'z': z,
+            'P': P,
+            'L': L,
+            'H': H,
+            'h': h,
             'SD_E': SD_E,
             'SD_N': SD_N,
             'SD_U': SD_U
@@ -637,14 +699,10 @@ if stns:
     w.field('SD_N', 'N', decimal=4)
     w.field('SD_U', 'N', decimal=4)
 
-
-
     for s in stns:
-
-
         w.point(stns[s]['L'], stns[s]['P'])
 
-        w.record(s, str(stns[s]['con']), float(stns[s]['E']), float(stns[s]['N']), int(stns[s]['Z']), float(stns[s]['P']),
+        w.record(s, str(stns[s]['con']), float(stns[s]['E']), float(stns[s]['N']), int(stns[s]['z']), float(stns[s]['P']),
                  float(stns[s]['L']), float(stns[s]['H']), float(stns[s]['h']), float(stns[s]['SD_E']),
                  float(stns[s]['SD_N']), float(stns[s]['SD_U']))
 
@@ -672,8 +730,6 @@ if h_msrs:
     w.field('nStat', 'N', decimal=4)
 
     for h in h_msrs:
-
-
         w.point(stns[h_msrs[h]['Stn1']]['L'], stns[h_msrs[h]['Stn1']]['P'])
 
         w.record(h_msrs[h]['Stn1'], h_msrs[h]['Msr'], h_msrs[h]['Msr_SD'], h_msrs[h]['Adj'],
@@ -704,7 +760,6 @@ if r_msrs:
     w.field('nStat', 'N', decimal=4)
 
     for r in r_msrs:
-
         w.point(stns[r_msrs[r]['Stn1']]['L'], stns[r_msrs[r]['Stn1']]['P'])
 
         w.record(r_msrs[r]['Stn1'], r_msrs[r]['Msr'], r_msrs[r]['Msr_SD'], r_msrs[r]['Adj'],
@@ -809,7 +864,6 @@ if e_msrs:
     w.field('nStat', 'N', decimal=4)
 
     for e in e_msrs:
-
         lon1 = stns[e_msrs[e]['Stn1']]['L']
         lat1 = stns[e_msrs[e]['Stn1']]['P']
 
@@ -847,7 +901,6 @@ if m_msrs:
     w.field('nStat', 'N', decimal=4)
 
     for m in m_msrs:
-
         lon1 = stns[m_msrs[m]['Stn1']]['L']
         lat1 = stns[m_msrs[m]['Stn1']]['P']
 
@@ -897,9 +950,7 @@ if g_msrs:
     w.field('nStat_Z', 'N', decimal=4)
     w.field('max_nStat', 'N', decimal=4)
 
-
     for g in g_msrs:
-
         lon1 = stns[g_msrs[g]['Stn1']]['L']
         lat1 = stns[g_msrs[g]['Stn1']]['P']
 
@@ -952,7 +1003,6 @@ if x_msrs:
     w.field('nStat_Y', 'N', decimal=4)
     w.field('nStat_Z', 'N', decimal=4)
     w.field('max_nStat', 'N', decimal=4)
-
 
     for x in x_msrs:
         lon1 = stns[x_msrs[x]['Stn1']]['L']
