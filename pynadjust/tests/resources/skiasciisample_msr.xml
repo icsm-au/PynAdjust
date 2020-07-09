@@ -3,51 +3,51 @@
   <DnaMeasurement>
     <Type>G</Type>
     <ReferenceFrame>ITRF2014</ReferenceFrame>
-    <Epoch>16.02.2020</Epoch>
+    <Epoch>17.02.2020</Epoch>
     <Vscale>1.0</Vscale>
     <Pscale>1.0</Pscale>
     <Lscale>1.0</Lscale>
     <Hscale>1.0</Hscale>
-    <First>315301790</First>
-    <Second>GLNG</Second>
+    <First>QCLF</First>
+    <Second>315301790</Second>
     <GPSBaseline>
-      <X>2369.1251</X>
-      <Y>6067.8342</Y>
-      <Z>1979.1341</Z>
-      <SigmaXX>3.7577006879e-005</SigmaXX>
-      <SigmaXY>-2.4803755878e-005</SigmaXY>
-      <SigmaXZ>3.0683288060e-005</SigmaXZ>
-      <SigmaYY>1.9898328901e-005</SigmaYY>
-      <SigmaYZ>-2.1731964807e-005</SigmaYZ>
-      <SigmaZZ>3.0889535992e-005</SigmaZZ>
+      <X>5109.120</X>
+      <Y>18944.677</Y>
+      <Z>8669.898</Z>
+      <SigmaXX>2.259984357487793e-06</SigmaXX>
+      <SigmaXY>-1.0705832558826764e-06</SigmaXY>
+      <SigmaXZ>1.2463278455727293e-06</SigmaXZ>
+      <SigmaYY>1.218133244551925e-06</SigmaYY>
+      <SigmaYZ>-7.11315528632158e-07</SigmaYZ>
+      <SigmaZZ>1.6318086467442724e-06</SigmaZZ>
     </GPSBaseline>
   </DnaMeasurement>
   <DnaMeasurement>
     <Type>G</Type>
     <ReferenceFrame>ITRF2014</ReferenceFrame>
-    <Epoch>16.02.2020</Epoch>
+    <Epoch>17.02.2020</Epoch>
     <Vscale>1.0</Vscale>
     <Pscale>1.0</Pscale>
     <Lscale>1.0</Lscale>
     <Hscale>1.0</Hscale>
-    <First>315301790</First>
-    <Second>QCLF</Second>
+    <First>GLNG</First>
+    <Second>315301790</Second>
     <GPSBaseline>
-      <X>-5109.1158</X>
-      <Y>-18944.6802</Y>
-      <Z>-8669.8927</Z>
-      <SigmaXX>1.3167082216e-004</SigmaXX>
-      <SigmaXY>-8.7384985818e-005</SigmaXY>
-      <SigmaXZ>1.1008245929e-004</SigmaXZ>
-      <SigmaYY>7.0152214903e-005</SigmaYY>
-      <SigmaYZ>-7.7632736065e-005</SigmaYZ>
-      <SigmaZZ>1.1299477046e-004</SigmaZZ>
+      <X>-2369.111</X>
+      <Y>-6067.840</Y>
+      <Z>-1979.130</Z>
+      <SigmaXX>2.4142490434898075e-08</SigmaXX>
+      <SigmaXY>-1.3538742071275875e-08</SigmaXY>
+      <SigmaXZ>1.4693544447810498e-08</SigmaXZ>
+      <SigmaYY>1.6650206919579618e-08</SigmaYY>
+      <SigmaYZ>-1.0204366308466795e-08</SigmaYZ>
+      <SigmaZZ>2.3455181781839934e-08</SigmaZZ>
     </GPSBaseline>
   </DnaMeasurement>
   <DnaMeasurement>
     <Type>G</Type>
     <ReferenceFrame>ITRF2014</ReferenceFrame>
-    <Epoch>16.02.2020</Epoch>
+    <Epoch>17.02.2020</Epoch>
     <Vscale>1.0</Vscale>
     <Pscale>1.0</Pscale>
     <Lscale>1.0</Lscale>
@@ -55,15 +55,15 @@
     <First>WPND</First>
     <Second>315301790</Second>
     <GPSBaseline>
-      <X>-7915.2689</X>
-      <Y>-8161.9351</Y>
-      <Z>2238.3020</Z>
-      <SigmaXX>6.3498329837e-005</SigmaXX>
-      <SigmaXY>-4.2321586079e-005</SigmaXY>
-      <SigmaXZ>5.2459374274e-005</SigmaXZ>
-      <SigmaYY>3.3412423363e-005</SigmaYY>
-      <SigmaYZ>-3.6646502849e-005</SigmaYZ>
-      <SigmaZZ>5.2493371186e-005</SigmaZZ>
+      <X>-7915.243</X>
+      <Y>-8161.952</Y>
+      <Z>2238.312</Z>
+      <SigmaXX>9.069739948183697e-08</SigmaXX>
+      <SigmaXY>-4.84238313265312e-08</SigmaXY>
+      <SigmaXZ>5.227723695541628e-08</SigmaXZ>
+      <SigmaYY>6.299138589259076e-08</SigmaYY>
+      <SigmaYZ>-3.753884174571157e-08</SigmaYZ>
+      <SigmaZZ>8.45986596793299e-08</SigmaZZ>
     </GPSBaseline>
   </DnaMeasurement>
 </DnaXmlFormat>
