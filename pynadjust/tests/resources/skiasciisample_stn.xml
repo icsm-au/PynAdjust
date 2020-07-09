@@ -1,0 +1,55 @@
+<?xml version='1.0' encoding='utf-8'?>
+<DnaXmlFormat xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNameSpaceSchemaLocation="DynaML.xsd" type="Station File">
+  <DnaStation>
+    <Name>315301790</Name>
+    <Constraints>FFF</Constraints>
+    <Type>LLH</Type>
+    <StationCoord>
+      <Name>315301790</Name>
+      <XAxis>-38.10151507762222</XAxis>
+      <YAxis>144.25409507323462</YAxis>
+      <Height>14.9719</Height>
+      <HemisphereZone>S55</HemisphereZone>
+    </StationCoord>
+    <Description>315301790, ?, ?</Description>
+  </DnaStation>
+  <DnaStation>
+    <Name>GLNG</Name>
+    <Constraints>FFF</Constraints>
+    <Type>LLH</Type>
+    <StationCoord>
+      <Name>GLNG</Name>
+      <XAxis>-38.08524832817262</XAxis>
+      <YAxis>144.21216522723313</YAxis>
+      <Height>55.5619</Height>
+      <HemisphereZone>S55</HemisphereZone>
+    </StationCoord>
+    <Description>GLNG, ?, ?</Description>
+  </DnaStation>
+  <DnaStation>
+    <Name>QCLF</Name>
+    <Constraints>FFF</Constraints>
+    <Type>LLH</Type>
+    <StationCoord>
+      <Name>QCLF</Name>
+      <XAxis>-38.16131300328047</XAxis>
+      <YAxis>144.3817137056131</YAxis>
+      <Height>12.1204</Height>
+      <HemisphereZone>S55</HemisphereZone>
+    </StationCoord>
+    <Description>QCLF, ?, ?</Description>
+  </DnaStation>
+  <DnaStation>
+    <Name>WPND</Name>
+    <Constraints>FFF</Constraints>
+    <Type>LLH</Type>
+    <StationCoord>
+      <Name>WPND</Name>
+      <XAxis>-38.11458450457344</XAxis>
+      <YAxis>144.17588925654357</YAxis>
+      <Height>80.0521</Height>
+      <HemisphereZone>S55</HemisphereZone>
+    </StationCoord>
+    <Description>WPND, ?, ?</Description>
+  </DnaStation>
+</DnaXmlFormat>
