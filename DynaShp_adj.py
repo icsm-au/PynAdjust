@@ -634,12 +634,6 @@ for line in adj_fh:
         SD_N = float(results[r_count + 1])
         SD_U = float(results[r_count + 2])
 
-        # Read Station Description
-        try:
-            Desc = str(results[r_count + 3].split(',')[0])
-        except IndexError:
-            Desc = ''
-
         if not E:
             ENz = gc.geo2grid(P, L)
             E = ENz[2]
@@ -657,8 +651,7 @@ for line in adj_fh:
             'h': h,
             'SD_E': SD_E,
             'SD_N': SD_N,
-            'SD_U': SD_U,
-            'Desc': Desc
+            'SD_U': SD_U
         }
 
 
@@ -705,14 +698,13 @@ if stns:
     w.field('SD_E', 'N', decimal=4)
     w.field('SD_N', 'N', decimal=4)
     w.field('SD_U', 'N', decimal=4)
-    w.field('Description', 'C', size=20)
 
     for s in stns:
         w.point(stns[s]['L'], stns[s]['P'])
 
         w.record(s, str(stns[s]['con']), float(stns[s]['E']), float(stns[s]['N']), int(stns[s]['z']), float(stns[s]['P']),
                  float(stns[s]['L']), float(stns[s]['H']), float(stns[s]['h']), float(stns[s]['SD_E']),
-                 float(stns[s]['SD_N']), float(stns[s]['SD_U']), str(stns[s]['Desc']))
+                 float(stns[s]['SD_N']), float(stns[s]['SD_U']))
 
     w.close()
 
