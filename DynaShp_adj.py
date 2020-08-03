@@ -68,6 +68,7 @@ msr_switch = False
 stn_switch = False
 msr_line = None
 stn_line = None
+desc_index = None
 line_count = 0
 
 mandatory_coord_types = 'PLHh'
@@ -121,6 +122,8 @@ for line in adj_fh:
     if stn_line:
         if line_count == stn_line:
             stn_switch = True
+        if line_count == stn_line - 2:
+            desc_index = line.find('Description')
 
     if line[:35] == 'Reference frame:                   ':
         ref_frame = line[35:].strip()
@@ -635,10 +638,10 @@ for line in adj_fh:
         SD_U = float(results[r_count + 2])
 
         # Read Station Description
-        try:
-            Desc = str(results[r_count + 3].split(',')[0])
-        except IndexError:
+        if desc_index is None or desc_index == -1:
             Desc = ''
+        else:
+            Desc = str(line[desc_index:].strip())
 
         if not E:
             ENz = gc.geo2grid(P, L)
