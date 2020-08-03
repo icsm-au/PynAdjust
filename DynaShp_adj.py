@@ -24,6 +24,10 @@
 #           - Station read works with variable coordinate types.
 #             Minimum required coord types are PLHh
 # ----------------------------------------------------------------------
+#  Update:  04 August 2020 (Josh Batchelor)
+#           - Added Station Description output
+# ----------------------------------------------------------------------
+
 
 import geodepy.convert as gc
 import os
