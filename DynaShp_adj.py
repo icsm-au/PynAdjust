@@ -24,6 +24,10 @@
 #           - Station read works with variable coordinate types.
 #             Minimum required coord types are PLHh
 # ----------------------------------------------------------------------
+#  Update:  04 August 2020 (Josh Batchelor)
+#           - Added Station Description output
+# ----------------------------------------------------------------------
+
 
 import geodepy.convert as gc
 import os
@@ -68,6 +72,7 @@ msr_switch = False
 stn_switch = False
 msr_line = None
 stn_line = None
+desc_index = None
 line_count = 0
 
 mandatory_coord_types = 'PLHh'
@@ -121,6 +126,8 @@ for line in adj_fh:
     if stn_line:
         if line_count == stn_line:
             stn_switch = True
+        if line_count == stn_line - 2:
+            desc_index = line.find('Description')
 
     if line[:35] == 'Reference frame:                   ':
         ref_frame = line[35:].strip()
@@ -634,6 +641,12 @@ for line in adj_fh:
         SD_N = float(results[r_count + 1])
         SD_U = float(results[r_count + 2])
 
+        # Read Station Description
+        if desc_index is None or desc_index == -1:
+            Desc = ''
+        else:
+            Desc = str(line[desc_index:].strip())
+
         if not E:
             ENz = gc.geo2grid(P, L)
             E = ENz[2]
@@ -651,7 +664,8 @@ for line in adj_fh:
             'h': h,
             'SD_E': SD_E,
             'SD_N': SD_N,
-            'SD_U': SD_U
+            'SD_U': SD_U,
+            'Desc': Desc
         }
 
 
@@ -698,13 +712,14 @@ if stns:
     w.field('SD_E', 'N', decimal=4)
     w.field('SD_N', 'N', decimal=4)
     w.field('SD_U', 'N', decimal=4)
+    w.field('Description', 'C', size=20)
 
     for s in stns:
         w.point(stns[s]['L'], stns[s]['P'])
 
         w.record(s, str(stns[s]['con']), float(stns[s]['E']), float(stns[s]['N']), int(stns[s]['z']), float(stns[s]['P']),
                  float(stns[s]['L']), float(stns[s]['H']), float(stns[s]['h']), float(stns[s]['SD_E']),
-                 float(stns[s]['SD_N']), float(stns[s]['SD_U']))
+                 float(stns[s]['SD_N']), float(stns[s]['SD_U']), str(stns[s]['Desc']))
 
     w.close()
 
