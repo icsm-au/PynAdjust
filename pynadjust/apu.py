@@ -1,10 +1,12 @@
 # pynadjust apu module - retrieve data from .apu files
 
-import datetime
 import geodepy.convert as gc
 import numpy as np
 import geodepy.statistics as gstat
 import scipy.spatial as sspat
+from pynadjust_classes import Station, DynaMetadata
+import common_fn
+import xyz
 
 # ----------------------------------------------------------------------
 # Classes and functions
@@ -12,31 +14,213 @@ import scipy.spatial as sspat
 
 
 class DynaApu(object):
-    def __init__(self):
-        self.stns = {}
-        self.version = None
-        self.file_name = None
-        self.file_date = None
-        self.confidence_interval = None
-        self.vcv_blocks = None
-        self.variance_matrix_units = None
-        self.full_covariance_matrix = None
+    def __init__(self, filename, stns=None, metadata=None):
+
+        def read_apu(apu_file, stns, read_metadata):
+            """
+            Function to consume DynAdjust *.apu file and read contents into a DynaApu object
+            note: Variance matrix components are stored in XYZ rotation ONLY.
+                      - ENU Variance matrix components are rotated back to XYZ.
+                      - ENU Covariance block matrix components are rotated back to XYZ, at the position of the 'first' station.
+            :param apu_file: input *.apu file
+            :param stns: either None, or dictionary of station objects from earlier adj/xyz read
+            :param read_metadata: True/False switch to read metadata from file, or carry across from earlier xyz/adj read
+            :return: DynaApu object fields (dictionary of stations) apu options, metadata
+            """
+
+            with open(apu_file) as apu_fh:
+                metadata_switch = True
+                rotate_vcv = False
+                pu_switch = False
+                pu_line = None
+                cov_count = 0
+
+                version = None
+                file_name = None
+                file_date = None
+                confidence_interval = None
+                vcv_blocks = False
+                variance_matrix_units = None
+                full_covariance_matrix = None
+                metadata = None
+
+                # set xyz_stns switch true to add apu info to existing stns dictionary from earlier xyz/adj read
+                if stns:
+                    xyz_stns = True
+                else:
+                    xyz_stns = False
+                    stns = {}
+
+                for line_count, line in enumerate(apu_fh):
+
+                    if metadata_switch:
+                        version = common_fn.read_metadata(line, 'Version:', version)
+                        file_name = common_fn.read_metadata(line, 'File name:', file_name)
+                        file_date = common_fn.read_file_date(line, file_date)
+                        confidence_interval = common_fn.read_metadata(line, 'PU confidence interval', confidence_interval)
+                        variance_matrix_units = common_fn.read_metadata(line, 'Variance matrix units ', variance_matrix_units)
+                        vcv_blocks = common_fn.read_metadata_tf(line, 'Stations printed in blocks', vcv_blocks)
+                        full_covariance_matrix = common_fn.read_metadata_tf(line, 'Full covariance matrix', full_covariance_matrix)
+
+                        if "Positional uncertainty of adjusted station coordinates" in line:
+                            pu_line = line_count + 5
+                            metadata_switch = False
+                            if variance_matrix_units == 'ENU':
+                                rotate_vcv = True
+                            if read_metadata:
+                                metadata = DynaMetadata(epoch=None, reference_frame=None, geoid_model=None, version=version)
+                            apu_options = DynaApu.ApuOptions(
+                                confidence_interval=confidence_interval,
+                                variance_matrix_units=variance_matrix_units,
+                                vcv_blocks=vcv_blocks,
+                                full_covariance_matrix=full_covariance_matrix
+                            )
+
+                    if pu_line:
+                        if line_count == pu_line:
+                            pu_switch = True
+
+                    if pu_switch:
+                        if line == '\n':
+                            continue
+
+                        if 'block' in line.lower():
+                            continue
+
+                        if '-'*30 in line:
+                            continue
+
+                        cols = line.split()
+                        num_cols = len(cols)
+
+                        # account for station names with spaces.
+                        temp = line[0:20]
+                        if temp != (' ' * 20):
+                            num_cols = len(line[21:].split()) + 1
+
+                        # Station variance line 1
+                        if num_cols == 11:
+                            stn = line[:20].strip()
+                            lat = gc.hp2dms(float(line[23:36]))
+                            lon = gc.hp2dms(float(line[38:51]))
+                            hpu = float(line[51:62].strip())
+                            vpu = float(line[62:73].strip())
+                            smaj = float(line[73:86].strip())
+                            smin = float(line[86:99].strip())
+                            brg = float(line[99:112].strip())
+                            vcv_11 = float(line[112:131].strip())
+                            vcv_12 = float(line[131:150].strip())
+                            vcv_13 = float(line[150:].strip())
+                            continue
+
+                        # Station variance line 2
+                        elif num_cols == 2:
+                            vcv_22 = float(line[131:150].strip())
+                            vcv_23 = float(line[150:].strip())
+                            continue
+
+                        #  Station variance line 3
+                        elif num_cols == 1:
+                            vcv_33 = float(line[150:].strip())
+
+                            vcv = np.array([
+                                [vcv_11, vcv_12, vcv_13],
+                                [vcv_12, vcv_22, vcv_23],
+                                [vcv_13, vcv_23, vcv_33],
+                            ])
+
+                            if rotate_vcv:
+                                vcv = gstat.vcv_local2cart(vcv, lat.dec(), lon.dec())
+
+                            # update existing or create new station object
+                            if xyz_stns:
+                                stns[stn].hpu = hpu
+                                stns[stn].vpu = vpu
+                                stns[stn].vpu = vpu
+                                stns[stn].smaj = smaj
+                                stns[stn].smin = smin
+                                stns[stn].brg = brg
+                                stns[stn].vcv = vcv
+                            else:
+                                apu_stn = Station(
+                                    name=stn,
+                                    con=None,
+                                    lat=lat,
+                                    lon=lon,
+                                    ehgt=None,
+                                    ohgt=None,
+                                    sd_e=None,
+                                    sd_n=None,
+                                    sd_u=None,
+                                    description=None,
+                                    hpu=hpu,
+                                    vpu=vpu,
+                                    smaj=smaj,
+                                    smin=smin,
+                                    brg=brg,
+                                    vcv=vcv,
+                                    covariances={}
+                                )
+
+                                stns[stn] = apu_stn
+
+                        # covariance block information
+                        if full_covariance_matrix:
+                            if num_cols == 4:
+                                cov_stn = line[:20].strip()
+                                cov_11 = float(line[113:131].strip())
+                                cov_12 = float(line[132:150].strip())
+                                cov_13 = float(line[151:169].strip())
+                                cov_count = 1
+
+                            elif num_cols == 3:
+                                cov_count += 1
+                                if cov_count == 2:
+                                    cov_21 = float(line[113:131].strip())
+                                    cov_22 = float(line[132:150].strip())
+                                    cov_23 = float(line[151:169].strip())
+                                elif cov_count == 3:
+                                    cov_31 = float(line[113:131].strip())
+                                    cov_32 = float(line[132:150].strip())
+                                    cov_33 = float(line[151:169].strip())
+
+                                    cov = np.array([
+                                        [cov_11, cov_12, cov_13],
+                                        [cov_21, cov_22, cov_23],
+                                        [cov_31, cov_32, cov_33],
+                                    ])
+
+                                    if rotate_vcv:
+                                        cov = gstat.vcv_local2cart(cov, stns[stn].lat.dec(), stns[stn].lon.dec())
+
+                                    if cov_stn not in stns[stn].covariances:
+                                        stns[stn].covariances[cov_stn] = cov
+
+            return stns, metadata, file_name, file_date, apu_options
+
+        read_metadata = True
+        if metadata:
+            read_metadata = False
+            self.metadata = metadata
+
+        result = read_apu(filename, stns, read_metadata=read_metadata)
+
+        self.stns = result[0]
+        if not metadata:
+            self.metadata = result[1]
+        self.file_name = result[2]
+        self.file_date = result[3]
+        self.options = result[4]
         self.relative_uncertainties = []
         self.ru_strategy = None
         self.ru_neighbours = None
 
-    class Station(object):
-        def __init__(self):
-            self.name = None
-            self.lat = None
-            self.lon = None
-            self.hpu = None
-            self.vpu = None
-            self.smaj = None
-            self.smin = None
-            self.brg = None
-            self.vcv = None
-            self.covariances = {}
+    class ApuOptions(object):
+        def __init__(self, confidence_interval, vcv_blocks, variance_matrix_units, full_covariance_matrix):
+            self.confidence_interval = confidence_interval
+            self.vcv_blocks = vcv_blocks
+            self.variance_matrix_units = variance_matrix_units
+            self.full_covariance_matrix = full_covariance_matrix
 
     class RelativeUncertainty(object):
         def __init__(self):
@@ -64,7 +248,7 @@ def retrieve_covariance(apu_object, stn1, stn2):
     cov_found = False
     rot_stn = None
 
-    if apu_object.full_covariance_matrix:
+    if apu_object.options.full_covariance_matrix:
         if apu_object.stns[stn1].covariances:
             if stn2 in apu_object.stns[stn1].covariances:
                 cov = apu_object.stns[stn1].covariances[stn2]
@@ -80,25 +264,6 @@ def retrieve_covariance(apu_object, stn1, stn2):
     return cov_found, cov, rot_stn
 
 
-def retrieve_stns(apu_object, *stn):
-    """
-    function to retrieve Station objects for requested stations
-    :param apu_object: DynaApu object from read_apu() call
-    :param stn: name of station to be retrieved
-    :return: list of Station objects
-    """
-
-    stns = []
-
-    for s in stn:
-        if s in apu_object.stns:
-            stns.append(apu_object.stns[s])
-        else:
-            raise ValueError(f'{s} not found in .apu file')
-
-    return stns
-
-
 def compute_rel_uncertainty(apu_object, strategy, neighbours=15):
     """
     function to compute relative uncertainties between stations in a DynaApu object
@@ -107,7 +272,6 @@ def compute_rel_uncertainty(apu_object, strategy, neighbours=15):
                      "nearest" computes relative uncertainties between a subject station and its nearest neighbours
     :param neighbours: Number of surrounding stations for which relative uncertainty is computed (using "nearest"
                        strategy)
-    :return:
     """
 
     def add_rel_unc(apu_object, stn1, stn2):
@@ -125,19 +289,6 @@ def compute_rel_uncertainty(apu_object, strategy, neighbours=15):
         vcv2 = apu_object.stns[stn2].vcv
 
         cov_used, cov, rot_stn = retrieve_covariance(apu_object, stn1, stn2)
-
-        # check variance matrix in XYZ.
-        if apu_object.variance_matrix_units == 'ENU':
-            vcv1 = gstat.vcv_local2cart(vcv1, lat, lon)
-            lat2 = apu_object.stns[stn2].lat.dec()
-            lon2 = apu_object.stns[stn2].lon.dec()
-            vcv2 = gstat.vcv_local2cart(vcv2, lat2, lon2)
-            # rotate covariance block back to XYZ if required
-            if cov_used:
-                if rot_stn == stn1:
-                    cov = gstat.vcv_local2cart(cov, lat, lon)
-                elif rot_stn == stn2:
-                    cov = gstat.vcv_local2cart(cov, lat2, lon2)
 
         r_err = gstat.relative_error(lat, lon, vcv1, vcv2, cov)
         r_hu = gstat.circ_hz_pu(r_err[0], r_err[1])
@@ -204,168 +355,22 @@ def compute_rel_uncertainty(apu_object, strategy, neighbours=15):
 
                 add_rel_unc(apu_object, stn1, stn2)
 
-    return
-
-
-def read_apu(apu_file):
-    """
-    Function to consume DynAdjust *.apu file and read contents into a DynaApu object
-    :param apu_file: input *.apu file
-    :return: DynaApu object
-    """
-
-    dyna_apu = DynaApu()
-
-    with open(apu_file) as apu_fh:
-        line_count = 0
-
-        metadata_switch = True
-        pu_switch = False
-        pu_line = None
-        cov_count = 0
-
-        for line in apu_fh:
-            line_count += 1
-
-            if metadata_switch:
-                if line[:35] == 'Version:                           ':
-                    dyna_apu.version = line[35:].strip()
-
-                if line[:35] == 'File name:                         ':
-                    dyna_apu.file_name = line[35:].strip()
-
-                if line[:35] == 'File created:                      ':
-                    date_str = line[35:].strip()
-                    dyna_apu.file_date = datetime.datetime.strptime(date_str, '%A, %d %B %Y, %I:%M:%S %p')
-                    dyna_apu.file_name = line[35:].strip()
-
-                if line[:35] == 'PU confidence interval             ':
-                    dyna_apu.confidence_interval = line[35:].strip()
-
-                if line[:35] == 'Stations printed in blocks         ':
-                    if 'Yes' in line[35:].strip():
-                        dyna_apu.vcv_blocks = True
-                    else:
-                        dyna_apu.vcv_blocks = False
-
-                if line[:35] == 'Variance matrix units              ':
-                    dyna_apu.variance_matrix_units = line[35:].strip()
-
-                if line[:35] == 'Full covariance matrix             ':
-                    if line[35:].strip() == 'No':
-                        dyna_apu.full_covariance_matrix = False
-                    elif line[35:].strip() == 'Yes':
-                        dyna_apu.full_covariance_matrix = True
-
-                if "Positional uncertainty of adjusted station coordinates" in line:
-                    pu_line = line_count + 5
-                    metadata_switch = False
-
-            if pu_line:
-                if line_count == pu_line:
-                    pu_switch = True
-
-            if pu_switch:
-                if line == '\n':
-                    continue
-
-                if 'block' in line.lower():
-                    continue
-
-                if '-'*30 in line:
-                    continue
-
-                cols = line.split()
-                num_cols = len(cols)
-
-                # account for station names with spaces.
-                temp = line[0:20]
-                if temp != (' ' * 20):
-                    num_cols = len(line[21:].split()) + 1
-
-                # Station variance line 1
-                if num_cols == 11:
-                    stn = line[:20].strip()
-                    lat = gc.hp2dms(float(line[23:36]))
-                    lon = gc.hp2dms(float(line[38:51]))
-                    hpu = float(line[51:62].strip())
-                    vpu = float(line[62:73].strip())
-                    smaj = float(line[73:86].strip())
-                    smin = float(line[86:99].strip())
-                    brg = float(line[99:112].strip())
-                    vcv_11 = float(line[112:131].strip())
-                    vcv_12 = float(line[131:150].strip())
-                    vcv_13 = float(line[150:].strip())
-                    continue
-
-                # Station variance line 2
-                elif num_cols == 2:
-                    vcv_22 = float(line[131:150].strip())
-                    vcv_23 = float(line[150:].strip())
-                    continue
-
-                #  Station variance line 3
-                elif num_cols == 1:
-                    vcv_33 = float(line[150:].strip())
-
-                    vcv = np.array([
-                        [vcv_11, vcv_12, vcv_13],
-                        [vcv_12, vcv_22, vcv_23],
-                        [vcv_13, vcv_23, vcv_33],
-                    ])
-
-                    apu_stn = DynaApu.Station()
-                    apu_stn.name = stn
-                    apu_stn.lat = lat
-                    apu_stn.lon = lon
-                    apu_stn.hpu = hpu
-                    apu_stn.vpu = vpu
-                    apu_stn.smaj = smaj
-                    apu_stn.smin = smin
-                    apu_stn.brg = brg
-                    apu_stn.vcv = vcv
-
-                    dyna_apu.stns[stn] = apu_stn
-
-                # covariance block information
-                if dyna_apu.full_covariance_matrix:
-                    if num_cols == 4:
-                        cov_stn = line[:20].strip()
-                        cov_11 = float(line[113:131].strip())
-                        cov_12 = float(line[132:150].strip())
-                        cov_13 = float(line[151:169].strip())
-                        cov_count = 1
-
-                    elif num_cols == 3:
-                        cov_count += 1
-                        if cov_count == 2:
-                            cov_21 = float(line[113:131].strip())
-                            cov_22 = float(line[132:150].strip())
-                            cov_23 = float(line[151:169].strip())
-                        elif cov_count == 3:
-                            cov_31 = float(line[113:131].strip())
-                            cov_32 = float(line[132:150].strip())
-                            cov_33 = float(line[151:169].strip())
-
-                            cov = np.array([
-                                [cov_11, cov_12, cov_13],
-                                [cov_21, cov_22, cov_23],
-                                [cov_31, cov_32, cov_33],
-                            ])
-
-                            if cov_stn not in apu_stn.covariances:
-                                apu_stn.covariances[cov_stn] = cov
-    return dyna_apu
-
 
 # ----------------------------------------------------------------------
 # Example use
 # ----------------------------------------------------------------------
 
 apu_file = ''
+xyz_file = ''
+
+if xyz_file:
+    xyz_results = xyz.DynaXYZ(xyz_file)
 
 if apu_file:
-    apu_results = read_apu(apu_file)
+    if xyz_file:
+        apu_results = DynaApu(apu_file, xyz_results.stations, xyz_results.metadata)
+    else:
+        apu_results = DynaApu(apu_file)
 
     # Note: option strategy='all' will compute many-to-many RU. Use with caution on large networks!
     # compute_rel_uncertainty(apu_results, strategy='all')
@@ -376,10 +381,14 @@ if apu_file:
     out_str += '-' * 80 + '\n'
     out_str += f'File name:              {apu_results.file_name}\n'
     out_str += f'File date:              {apu_results.file_date}\n'
-    out_str += f'Version:                {apu_results.version}\n'
-    out_str += f'Confidence interval:    {apu_results.confidence_interval}\n'
-    out_str += f'Variance matrix units:  {apu_results.variance_matrix_units}\n'
-    out_str += f'Full covariances:       {apu_results.full_covariance_matrix}\n'
+    if xyz_file:
+        out_str += f'Reference frame:        {apu_results.metadata.reference_frame}\n'
+        out_str += f'Epoch:                  {apu_results.metadata.epoch}\n'
+        out_str += f'Geoid model:            {apu_results.metadata.geoid_model}\n'
+    out_str += f'Version:                {apu_results.metadata.version}\n'
+    out_str += f'Confidence interval:    {apu_results.options.confidence_interval}\n'
+    out_str += f'Variance matrix units:  {apu_results.options.variance_matrix_units}\n'
+    out_str += f'Full covariances:       {apu_results.options.full_covariance_matrix}\n'
     out_str += '-' * 80 + '\n'
 
     # Positional Uncertainty
@@ -440,6 +449,9 @@ if apu_file:
     # write to file
     with open('apu_results.txt', 'w') as out_fh:
         out_fh.write(out_str)
+
+    # write shapefiles
+    common_fn.write_stns_shapefile(apu_results.stns, 'apu_results', ref_frame=apu_results.metadata.reference_frame)
 
     # # retrieve specific stations and write to file - caution: requested stations must be present in file
     # r_stns = retrieve_stns(apu_results, 'ARMD', 'TS7379')
