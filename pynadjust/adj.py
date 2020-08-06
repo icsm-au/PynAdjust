@@ -2,17 +2,16 @@
 
 # For review/consideration:
 #     - Confirm all measurement types and components read and stored correctly (test on adj will all msr types)
-#     - Store Latitude/Longitude as DMSAngle objects (or as Decimal degrees float)
+#     - Store Latitude/Longitude as DMSAngle objects (done here) or as Decimal degrees float
 #     - Consider storing measurement objects in a dictionary (done here), or set.
-#     - expand shapefile function to include all fields
-#     - expand shapefile function to include option for uncertainty figures using apu object (once apu.py complete)
-
 
 import datetime
 import geodepy.convert as gc
 import shapefile
 import os
-
+import common_fn
+from pynadjust_classes import Station, DynaMetadata
+from xyz import read_coord_elements, DynaXYZ
 
 # ----------------------------------------------------------------------
 # sets for various msr types
@@ -34,89 +33,422 @@ hp_msrs = ('I', 'J', 'P', 'Q')
 
 
 class DynaAdj(object):
-    def __init__(self):
-        self.stns = {}
-        self.msrs = {}
-        self.epoch = None
-        self.reference_frame = None
-        self.geoid_model = None
-        self.version = None
-        self.file_name = None
-        self.file_date = None
-        self.soln_type = None
-        self.run_time = None
-        self.parameters = None
-        self.msr_count = None
-        self.degrees_of_freedom = None
-        self.sigma_zero = None
-        self.chi_squared = None
-        self.outlier_count = None
-        self.global_pelzer = None
-        self.chi_square_lower = None
-        self.chi_square_upper = None
-        self.chi_square_result = None
+    def __init__(self, filename, stns=None, metadata=None):
+        """
+        DynaAdj object which reads all metadata, measurement and coordinate information upon initialisation
+        :param filename: name of adj file to be consumed.
+        :param stns: optional argument to use existing dictionary of station objects (e.g. following xyz read)
+        :param metadata: optional argument to use metadata object (e.g. following xyz read)
+        """
 
-    class Station(object):
-        def __init__(self):
-            self.name = None
-            self.con = None
-            self.lat = None
-            self.lon = None
-            self.ohgt = None
-            self.ehgt = None
-            self.sd_e = None
-            self.sd_n = None
-            self.sd_u = None
+        def read_adj(adj_file, read_stns, read_metadata):
+            """
+            Function/method to read all metadata, measurement and coordinate information from an adj file.
+            :param adj_file: name of adj file to be consumed.
+            :param read_stns: True/False switch to read station results in file
+            :param read_metadata: True/False switch to read metadata in file
+            :return: components of DynaAdj object for initialisation
+            """
 
-        def xyz(self):
-            return gc.llh2xyz(self.lat.dec(), self.lon.dec(), self.ehgt)
+            stns = {}
+            msrs = {}
+            version = None
+            reference_frame = None
+            file_name = None
+            file_date = None
+            epoch = None
+            geoid_model = None
+            soln_type = None
+            run_time = None
+            parameters = None
+            msr_count = None
+            outlier_count = None
+            degrees_of_freedom = None
+            chi_squared = None
+            sigma_zero = None
+            global_pelzer = None
+            chi_square_lower = None
+            chi_square_upper = None
+            chi_square_result = None
 
-        def grid(self):
-            return gc.geo2grid(self.lat.dec(), self.lon.dec())
+            with open(adj_file, 'r') as adj_fh:
+                stn_line = None
+                stn_switch = False
+                mandatory_coord_types = 'PLHh'
+
+                msr_line = None
+                msr_switch = False
+                msr_count = 0
+                dir_set = 0
+                msr_header_line = None
+                metadata_switch = True
+
+                for line_count, line in enumerate(adj_fh):
+
+                    if 'Adjusted Measurements' in line:
+                        msr_line = line_count + 5
+                        msr_header_line = line_count + 3
+                        three_line_count = 0
+
+                    if msr_line:
+                        if line_count == msr_line:
+                            metadata_switch = False
+                            metadata = DynaMetadata(epoch=epoch, reference_frame=reference_frame, geoid_model=geoid_model, version=version)
+                            adj_stats = DynaAdj.AdjStats(
+                                soln_type=soln_type,
+                                run_time=run_time,
+                                parameters=parameters,
+                                msr_count=msr_count,
+                                degrees_of_freedom=degrees_of_freedom,
+                                sigma_zero=sigma_zero,
+                                chi_squared=chi_squared,
+                                outlier_count=outlier_count,
+                                global_pelzer=global_pelzer,
+                                chi_square_lower=chi_square_lower,
+                                chi_square_upper=chi_square_upper,
+                                chi_square_result=chi_square_result
+                            )
+
+                            msr_switch = True
+
+                    if msr_header_line:
+                        if line_count == msr_header_line:
+                            tstat_switch, msr_id_switch = read_msr_fields(line)
+
+                    if read_stns:
+                        if 'Adjusted Coordinates' in line:
+                            stn_line = line_count + 5
+
+                        if stn_line:
+                            if line_count == stn_line - 2:
+                                desc_index = line.find('Description')
+
+                            if line_count == stn_line:
+                                stn_switch = True
+
+                    if metadata_switch:
+                        if read_metadata:
+                            version = common_fn.read_metadata(line, 'Version:', version)
+                            reference_frame = common_fn.read_metadata(line, 'Reference frame:', reference_frame)
+                            epoch = common_fn.read_epoch(line, epoch)
+                            geoid_model = common_fn.read_metadata(line, 'Geoid model:', geoid_model)
+
+                        # simple text reads (and more complex, but common, types) are done by function
+                        file_name = common_fn.read_metadata(line, 'File name:', file_name)
+                        file_date = common_fn.read_file_date(line, file_date)
+                        soln_type = common_fn.read_metadata(line, 'SOLUTION', soln_type)
+                        parameters = common_fn.read_metadata(line, 'Number of unknown parameters', parameters)
+                        degrees_of_freedom = common_fn.read_metadata(line, 'Degrees of freedom', degrees_of_freedom)
+                        chi_squared = common_fn.read_metadata(line, 'Chi squared', chi_squared)
+                        sigma_zero = common_fn.read_metadata(line, 'Rigorous Sigma Zero', sigma_zero)
+
+                        # more complex reads have their own if statements.
+                        if line[:35] == 'Total time                         ':
+                            items = line[35:].strip().split(':')
+                            hour = int(items[0])
+                            minute = int(items[1])
+                            second = float(items[2])
+                            run_time = datetime.timedelta(hours=hour, minutes=minute, seconds=second)
+
+                        if line[:35] == 'Number of measurements             ':
+                            items = line[35:].split()
+                            if len(items) > 1:
+                                if '(' in items[1]:
+                                    outliers = int(items[1].replace('(', ''))
+                            msr_count = int(items[0])
+                            outlier_count = outliers
+
+                        if line[:35] == 'Global (Pelzer) Reliability        ':
+                            items = line[35:].strip().split()
+                            global_pelzer = float(items[0])
+
+                        if line[:35] == 'Chi-Square test (95.0%)            ':
+                            items = line[35:].strip().split()
+                            chi_square_lower = float(items[0])
+                            chi_square_upper = float(items[4])
+                            chi_square_result = items[6].strip()
+
+                        if line[:35] == 'Station coordinate types:          ':
+                            coord_types = line[35:].strip()
+                            missing_coord_types = set()
+                            for l in mandatory_coord_types:
+                                if l not in coord_types:
+                                    missing_coord_types.add(l)
+                            if missing_coord_types:
+                                raise ValueError(f'Mandatory coordinate types {missing_coord_types} not present in {adj_file}')
+
+                    if stn_switch:
+                        if len(line) < 20:
+                            stn_switch = False
+                            continue
+
+                        # store details as a Station object, leaving uncertainty fields null
+                        stn_object = read_coord_elements(line, coord_types, desc_index)
+                        stns[stn_object.name] = stn_object
+
+                    if msr_switch:
+                        if line.strip() == '':
+                            msr_switch = False
+                            continue
+
+                        msr_components = read_msr_line(line, tstat_switch, msr_id_switch)
+                        msr_type = msr_components['msr_type']
+
+                        # Direction sets - initialise new msr object
+                        if msr_type == 'D':
+                            msr_count += 1
+                            dir_set += 1
+                            d_stn1 = msr_components['stn1']
+                            d_stn2 = msr_components['stn2']
+
+                            msr_object = DynaAdj.Measurement(
+                                msr_type=msr_type,
+                                stn1=d_stn1,
+                                stn2=d_stn2,
+                                stn3=[],
+                                ignore=[],
+                                msr=[],
+                                adj=[],
+                                cor=[],
+                                msr_sd=[],
+                                adj_sd=[],
+                                cor_sd=[],
+                                nstat=[],
+                                tstat=[],
+                                pelzer=[],
+                                pre_adj_cor=[],
+                                outlier=[],
+                                msr_id=[],
+                                cluster_id=[]
+                            )
+
+                            msrs[msr_count] = msr_object
+
+                        # Direction Set pointings - append msrs to lists
+                        elif msr_type == ' ':
+                            msrs[msr_count].stn3.append(msr_components['stn3'])
+                            msrs[msr_count].ignore.append(msr_components['ignore'])
+                            msrs[msr_count].msr.append(str_to_dms_angle(msr_components['msr']))
+                            msrs[msr_count].adj.append(str_to_dms_angle(msr_components['adj']))
+                            msrs[msr_count].cor.append(float(msr_components['cor']))
+                            msrs[msr_count].msr_sd.append(float(msr_components['msr_sd']))
+                            msrs[msr_count].adj_sd.append(float(msr_components['adj_sd']))
+                            msrs[msr_count].cor_sd.append(float(msr_components['cor_sd']))
+                            msrs[msr_count].nstat.append(float(msr_components['nstat']))
+                            if tstat_switch:
+                                msrs[msr_count].tstat.append(float(msr_components['tstat']))
+                            else:
+                                msrs[msr_count].tstat.append(None)
+                            msrs[msr_count].pelzer.append(float(msr_components['pelzer']))
+                            msrs[msr_count].pre_adj_cor.append(float(msr_components['pre_adj_cor']))
+                            msrs[msr_count].outlier.append(msr_components['outlier'])
+                            msrs[msr_count].msr_id.append(msr_components['msr_id'])
+                            msrs[msr_count].cluster_id.append(msr_components['cluster_id'])
+
+                        # Type X/Y/Z measurements (split over 3 lines)
+                        elif msr_type in three_line_msrs:
+                            three_line_count += 1
+
+                            if three_line_count % 3 == 1:
+                                # re-initialise lists at new msr
+                                cardinal_list = []
+                                msr_list = []
+                                adj_list = []
+                                cor_list = []
+                                msr_sd_list = []
+                                adj_sd_list = []
+                                cor_sd_list = []
+                                nstat_list = []
+                                tstat_list = []
+                                pelzer_list = []
+                                pre_adj_cor_list = []
+                                outlier_list = []
+                                msr_id = msr_components['msr_id']
+                                cluster_id = msr_components['cluster_id']
+
+                            stn1 = msr_components['stn1']
+
+                            if msr_components['stn2'] != '':
+                                stn2 = msr_components['stn2']
+                            else:
+                                stn2 = None
+
+                            ignore = msr_components['ignore']
+
+                            cardinal_list.append(msr_components['cardinal'])
+                            msr_list.append(float(msr_components['msr']))
+                            adj_list.append(float(msr_components['adj']))
+                            cor_list.append(float(msr_components['cor']))
+                            msr_sd_list.append(float(msr_components['msr_sd']))
+                            adj_sd_list.append(float(msr_components['adj_sd']))
+                            cor_sd_list.append(float(msr_components['cor_sd']))
+                            nstat_list.append(float(msr_components['nstat']))
+                            if tstat_switch:
+                                tstat_list.append(float(msr_components['tstat']))
+                            else:
+                                tstat_list.append(None)
+                            pelzer_list.append(float(msr_components['pelzer']))
+                            pre_adj_cor_list.append(float(msr_components['pre_adj_cor']))
+                            outlier_list.append(msr_components['outlier'])
+
+                            if (three_line_count % 3) == 0:
+                                msr_count += 1
+
+                                msr_object = DynaAdj.Measurement(
+                                    msr_type=msr_type,
+                                    stn1=stn1,
+                                    stn2=stn2,
+                                    stn3=None,
+                                    ignore=ignore,
+                                    cardinal=cardinal_list,
+                                    msr=msr_list,
+                                    adj=adj_list,
+                                    cor=cor_list,
+                                    msr_sd=msr_sd_list,
+                                    adj_sd=adj_sd_list,
+                                    cor_sd=cor_sd_list,
+                                    nstat=nstat_list,
+                                    tstat=tstat_list,
+                                    pelzer=pelzer_list,
+                                    pre_adj_cor=pre_adj_cor_list,
+                                    outlier=outlier_list,
+                                    msr_id=msr_id,
+                                    cluster_id=cluster_id
+                                )
+
+                                msrs[msr_count] = msr_object
+                            else:
+                                pass
+
+                        # all other msr types
+                        else:
+                            msr_count += 1
+                            if msr_type in angle_msrs:
+                                msr = str_to_dms_angle(msr_components['msr'])
+                                adj = str_to_dms_angle(msr_components['adj'])
+                            elif msr_type in hp_msrs:
+                                msr = gc.hp2dec(msr_components['msr'])
+                                adj = gc.hp2dec(msr_components['adj'])
+                            else:
+                                msr = float(msr_components['msr'])
+                                adj = float(msr_components['adj'])
+
+                            if tstat_switch:
+                                tstat = float(msr_components['tstat'])
+
+                            if msr_id:
+                                msr_id = msr_components['msr_id']
+                                cluster_id = msr_components['cluster_id']
+
+                            msr_object = DynaAdj.Measurement(
+                                msr_type=msr_type,
+                                stn1=msr_components['stn1'],
+                                stn2=msr_components['stn2'],
+                                stn3=msr_components['stn3'],
+                                ignore=msr_components['ignore'],
+                                cardinal=msr_components['cardinal'],
+                                msr=msr,
+                                adj=adj,
+                                cor=float(msr_components['cor']),
+                                msr_sd=float(msr_components['msr_sd']),
+                                adj_sd=float(msr_components['adj_sd']),
+                                cor_sd=float(msr_components['cor_sd']),
+                                nstat=float(msr_components['nstat']),
+                                tstat=tstat,
+                                pelzer=float(msr_components['pelzer']),
+                                pre_adj_cor=float(msr_components['pre_adj_cor']),
+                                outlier=msr_components['outlier'],
+                                msr_id=msr_id,
+                                cluster_id=cluster_id
+                            )
+
+                            msrs[msr_count] = msr_object
+
+            return stns, msrs, metadata, file_name, file_date, adj_stats
+
+        # initialise read stns/metadata switches as True
+        read_stns = True
+        read_metadata = True
+
+        # turn off if stn/metadata info is present, and take current results
+        if stns:
+            read_stns = False
+            self.stns = stns
+            print('carried across stations from xyz file')
+        if metadata:
+            read_metadata = False
+            self.metadata = metadata
+            print('carried across metadata from xyz file')
+
+        results = read_adj(filename, read_stns=read_stns, read_metadata=read_metadata)
+
+        # assign if not read already
+        if read_stns:
+            self.stns = results[0]
+        if read_metadata:
+            self.metadata = results[2]
+
+        # assign rest of information to DynaAdj object
+        self.msrs = results[1]
+        self.file_name = results[3]
+        self.file_date = results[4]
+        self.adj_stats = results[5]
 
     class Measurement(object):
-        def __init__(self):
-            self.msr_type = None
-            self.stn1 = None
-            self.stn2 = None
-            self.stn3 = None
-            self.ignore = None
-            self.cardinal = None
-            self.msr = None
-            self.adj = None
-            self.cor = None
-            self.msr_sd = None
-            self.adj_sd = None
-            self.cor_sd = None
-            self.nstat = None
-            self.tstat = None
-            self.pelzer = None
-            self.pre_adj_cor = None
-            self.outlier = None
-            self.msr_id = None
-            self.cluster_id = None
+        def __init__(self, msr_type, stn1, stn2, stn3, ignore, cardinal, msr, adj, cor, msr_sd, adj_sd, cor_sd, nstat,
+                     tstat, pelzer, pre_adj_cor, outlier, msr_id, cluster_id):
+            self.msr_type = msr_type
+            self.stn1 = stn1
+            self.stn2 = stn2
+            self.stn3 = stn3
+            self.ignore = ignore
+            self.cardinal = cardinal
+            self.msr = msr
+            self.adj = adj
+            self.cor = cor
+            self.msr_sd = msr_sd
+            self.adj_sd = adj_sd
+            self.cor_sd = cor_sd
+            self.nstat = nstat
+            self.tstat = tstat
+            self.pelzer = pelzer
+            self.pre_adj_cor = pre_adj_cor
+            self.outlier = outlier
+            self.msr_id = msr_id
+            self.cluster_id = cluster_id
+
+    class AdjStats(object):
+        def __init__(self, soln_type, run_time, parameters, msr_count, degrees_of_freedom, sigma_zero, chi_squared,
+                     outlier_count, global_pelzer, chi_square_lower, chi_square_upper, chi_square_result):
+            self.soln_type = soln_type
+            self.run_time = run_time
+            self.parameters = parameters
+            self.msr_count = msr_count
+            self.degrees_of_freedom = degrees_of_freedom
+            self.sigma_zero = sigma_zero
+            self.chi_squared = chi_squared
+            self.outlier_count = outlier_count
+            self.global_pelzer = global_pelzer
+            self.chi_square_lower = chi_square_lower
+            self.chi_square_upper = chi_square_upper
+            self.chi_square_result = chi_square_result
 
 
-def write_shapefile(dyna_adj, network_name):
+def write_adj_shapefile(adj_object, network_name):
+    """
+    Function to write shapefiles using the adj results. Results are written to a 'Shp' sub-directory.
+    Existing results are overwritten.
+    :param adj_object: DynaAdj object
+    :param network_name: Name of network
+    """
 
-    def write_prj(file_name, ref_frame):
-
-        if ref_frame == 'GDA2020':
-            out_str = 'GEOGCS["GDA2020",DATUM["GDA2020",SPHEROID["GRS_1980",6378137.0,298.257222101]],' \
-                      'PRIMEM["Greenwich",0.0],UNIT["Degree",0.0174532925199433],AUTHORITY["EPSG",7844]]'
-        elif ref_frame == 'GDA94':
-            out_str = 'GEOGCS["GDA94",DATUM["D_GDA_1994",SPHEROID["GRS_1980",6378137,298.257222101]],' \
-                      'PRIMEM["Greenwich",0],UNIT["Degree",0.017453292519943295]]'
-        else:
-            out_str = None
-
-        if out_str != None:
-            prj_fh = open(file_name + '.prj', 'w')
-            prj_fh.write(out_str)
-            prj_fh.close()
-
-    def find_cardinal(msrs_object):
-        for m in msrs_object:
+    def find_cardinal(msrs_list):
+        """
+        function to determine 'cardinal' directions of DynAdjust GNSS measurements
+        :param msrs_object: list of Measurement objects
+        :return: string of cardinal directions: enu/XYZ
+        """
+        for m in msrs_list:
             if m.cardinal == ['e', 'n', 'u']:
                 cardinal = 'enu'
             else:
@@ -126,6 +458,11 @@ def write_shapefile(dyna_adj, network_name):
         return cardinal
 
     def max_stat(stat_list):
+        """
+        function to determine the maximum absolute value in a list
+        :param stat_list: list of floats
+        :return: maximum value
+        """
         max_stat = None
         for s in stat_list:
             if not max_stat:
@@ -135,58 +472,20 @@ def write_shapefile(dyna_adj, network_name):
 
         return max_stat
 
-    if os.path.exists('shp'):
-        os.chdir('shp')
-    else:
-        os.mkdir('shp')
-        os.chdir('shp')
+    common_fn.check_enter_dir('shp')
 
-    if dyna_adj.stns:
-        shp_name = network_name + '_stn'
-
-        write_prj(shp_name, dyna_adj.reference_frame)
-
-        w = shapefile.Writer(shp_name, shapeType=1)
-
-        w.autoBalance = 1
-
-        w.field('Station', 'C', size=20)
-        w.field('Constraints', 'C', size=3)
-        w.field('Easting', 'N', decimal=4)
-        w.field('Northing', 'N', decimal=4)
-        w.field('Zone', 'N')
-        w.field('Latitude', 'N', decimal=10)
-        w.field('Longitude', 'N', decimal=10)
-        w.field('OHGT', 'N', decimal=4)
-        w.field('EHGT', 'N', decimal=4)
-        w.field('SD_E', 'N', decimal=4)
-        w.field('SD_N', 'N', decimal=4)
-        w.field('SD_U', 'N', decimal=4)
-
-        for s in dyna_adj.stns.values():
-            w.point(s.lon.dec(), s.lat.dec())
-
-            grid = s.grid()
-
-            w.record(
-                s.name, s.con,
-                grid[2], grid[3], grid[1],
-                s.lat.dec(), s.lon.dec(),
-                s.ohgt, s.ehgt,
-                s.sd_e, s.sd_n, s.sd_u
-            )
-
-        w.close()
+    if adj_object.stns:
+        common_fn.write_stns_shapefile(adj_object.stns, network_name, ref_frame=adj_object.metadata.reference_frame)
 
     for l in msr_types:
-        result = [dyna_adj.msrs[m] for m in dyna_adj.msrs if dyna_adj.msrs[m].msr_type == l]
+        result = [adj_object.msrs[m] for m in adj_object.msrs if adj_object.msrs[m].msr_type == l]
 
         shp_name = network_name + '_' + l
 
         if result:
             # Direction sets
             if l in multi_line_msrs:
-                write_prj(shp_name, dyna_adj.reference_frame)
+                common_fn.write_prj(shp_name, adj_object.metadata.reference_frame)
 
                 w = shapefile.Writer(shp_name, shapeType=3)
 
@@ -204,8 +503,8 @@ def write_shapefile(dyna_adj, network_name):
 
                 for r in result:
                     w.line([
-                        [[dyna_adj.stns[r.stn1].lon.dec(), dyna_adj.stns[r.stn1].lat.dec()],
-                         [dyna_adj.stns[r.stn2].lon.dec(), dyna_adj.stns[r.stn2].lat.dec()]],
+                        [[adj_object.stns[r.stn1].lon.dec(), adj_object.stns[r.stn1].lat.dec()],
+                         [adj_object.stns[r.stn2].lon.dec(), adj_object.stns[r.stn2].lat.dec()]],
                     ])
 
                     w.record(r.stn1, r.stn2, 'set zero', None, None, None, None, None, None)
@@ -215,8 +514,8 @@ def write_shapefile(dyna_adj, network_name):
                         adj = '{:3d} {:2d} {:7.4f}'.format(r.adj[s].degree, r.adj[s].minute, r.adj[s].second)
 
                         w.line([
-                            [[dyna_adj.stns[r.stn1].lon.dec(), dyna_adj.stns[r.stn1].lat.dec()],
-                             [dyna_adj.stns[r.stn3[s]].lon.dec(), dyna_adj.stns[r.stn3[s]].lat.dec()]],
+                            [[adj_object.stns[r.stn1].lon.dec(), adj_object.stns[r.stn1].lat.dec()],
+                             [adj_object.stns[r.stn3[s]].lon.dec(), adj_object.stns[r.stn3[s]].lat.dec()]],
                         ])
 
                         w.record(r.stn1, r.stn3[s], msr, adj, r.cor[s], r.msr_sd[s], r.adj_sd[s], r.cor_sd[s], r.nstat[s])
@@ -225,7 +524,7 @@ def write_shapefile(dyna_adj, network_name):
 
             # H/I/J/P/Q/R/Y msrs
             elif l in one_stn_msrs:
-                write_prj(shp_name, dyna_adj.reference_frame)
+                common_fn.write_prj(shp_name, adj_object.metadata.reference_frame)
 
                 w = shapefile.Writer(shp_name, shapeType=1)
 
@@ -247,7 +546,7 @@ def write_shapefile(dyna_adj, network_name):
                     w.field('nstat', 'N', decimal=4)
 
                     for r in result:
-                        w.point(dyna_adj.stns[r.stn1].lon.dec(), dyna_adj.stns[r.stn1].lat.dec())
+                        w.point(adj_object.stns[r.stn1].lon.dec(), adj_object.stns[r.stn1].lat.dec())
 
                         w.record(r.stn1, r.msr, r.adj, r.cor, r.msr_sd, r.adj_sd, r.cor_sd, r.nstat)
 
@@ -284,7 +583,7 @@ def write_shapefile(dyna_adj, network_name):
                         max_nstat = max_stat(r.nstat)
                         max_cor = max_stat(r.cor)
 
-                        w.point(dyna_adj.stns[r.stn1].lon.dec(), dyna_adj.stns[r.stn1].lat.dec())
+                        w.point(adj_object.stns[r.stn1].lon.dec(), adj_object.stns[r.stn1].lat.dec())
 
                         w.record(r.stn1,
                                  r.msr[0], r.msr[1], r.msr[2],
@@ -302,7 +601,7 @@ def write_shapefile(dyna_adj, network_name):
             # B/C/E/G/K/L/M/S/V/X/Z
             elif l in two_stn_msrs:
 
-                write_prj(shp_name, dyna_adj.reference_frame)
+                common_fn.write_prj(shp_name, adj_object.metadata.reference_frame)
 
                 w = shapefile.Writer(shp_name, shapeType=3)
 
@@ -323,8 +622,8 @@ def write_shapefile(dyna_adj, network_name):
 
                         for r in result:
                             w.line([
-                                [[dyna_adj.stns[r.stn1].lon.dec(), dyna_adj.stns[r.stn1].lat.dec()],
-                                 [dyna_adj.stns[r.stn2].lon.dec(), dyna_adj.stns[r.stn2].lat.dec()]],
+                                [[adj_object.stns[r.stn1].lon.dec(), adj_object.stns[r.stn1].lat.dec()],
+                                 [adj_object.stns[r.stn2].lon.dec(), adj_object.stns[r.stn2].lat.dec()]],
                             ])
 
                             msr = '{:3d} {:2d} {:7.4f}'.format(r.msr.degree, r.msr.minute, r.msr.second)
@@ -346,8 +645,8 @@ def write_shapefile(dyna_adj, network_name):
 
                         for r in result:
                             w.line([
-                                [[dyna_adj.stns[r.stn1].lon.dec(), dyna_adj.stns[r.stn1].lat.dec()],
-                                [dyna_adj.stns[r.stn2].lon.dec(), dyna_adj.stns[r.stn2].lat.dec()]],
+                                [[adj_object.stns[r.stn1].lon.dec(), adj_object.stns[r.stn1].lat.dec()],
+                                 [adj_object.stns[r.stn2].lon.dec(), adj_object.stns[r.stn2].lat.dec()]],
                             ])
 
                             w.record(r.stn1, r.stn2, r.msr, r.adj, r.cor, r.msr_sd, r.adj_sd, r.cor_sd, r.nstat)
@@ -387,8 +686,8 @@ def write_shapefile(dyna_adj, network_name):
                         max_cor = max_stat(r.cor)
 
                         w.line([
-                            [[dyna_adj.stns[r.stn1].lon.dec(), dyna_adj.stns[r.stn1].lat.dec()],
-                            [dyna_adj.stns[r.stn2].lon.dec(), dyna_adj.stns[r.stn2].lat.dec()]],
+                            [[adj_object.stns[r.stn1].lon.dec(), adj_object.stns[r.stn1].lat.dec()],
+                             [adj_object.stns[r.stn2].lon.dec(), adj_object.stns[r.stn2].lat.dec()]],
                         ])
 
                         w.record(r.stn1, r.stn2,
@@ -406,7 +705,7 @@ def write_shapefile(dyna_adj, network_name):
 
             # A (not D)
             elif l in three_stn_msrs:
-                write_prj(shp_name, dyna_adj.reference_frame)
+                common_fn.write_prj(shp_name, adj_object.metadata.reference_frame)
 
                 w = shapefile.Writer(shp_name, shapeType=3)
 
@@ -428,18 +727,25 @@ def write_shapefile(dyna_adj, network_name):
                     adj = '{:3d} {:2d} {:7.4f}'.format(r.adj.degree, r.adj.minute, r.adj.second)
 
                     w.line([
-                        [[dyna_adj.stns[r.stn1].lon.dec(), dyna_adj.stns[r.stn1].lat.dec()],
-                         [dyna_adj.stns[r.stn2].lon.dec(), dyna_adj.stns[r.stn2].lat.dec()]],
-                        [[dyna_adj.stns[r.stn2].lon.dec(), dyna_adj.stns[r.stn2].lat.dec()],
-                         [dyna_adj.stns[r.stn3].lon.dec(), dyna_adj.stns[r.stn3].lat.dec()]],
+                        [[adj_object.stns[r.stn1].lon.dec(), adj_object.stns[r.stn1].lat.dec()],
+                         [adj_object.stns[r.stn2].lon.dec(), adj_object.stns[r.stn2].lat.dec()]],
+                        [[adj_object.stns[r.stn2].lon.dec(), adj_object.stns[r.stn2].lat.dec()],
+                         [adj_object.stns[r.stn3].lon.dec(), adj_object.stns[r.stn3].lat.dec()]],
                     ])
 
                     w.record(r.stn1, r.stn2, r.stn3, r.msr, r.adj, r.cor, r.msr_sd, r.adj_sd, r.cor_sd, r.nstat)
 
                 w.close()
+    # return to parent directory
+    os.chdir('..')
 
 
 def str_to_dms_angle(angle):
+    """
+    function to create a DMSAngle object from a string
+    :param angle: string of text in format "DDD MM SS.SSSS"
+    :return: DMSAngle object
+    """
     items = angle.split()
     deg = int(items[0])
     min = int(items[1])
@@ -450,6 +756,11 @@ def str_to_dms_angle(angle):
 
 
 def read_msr_fields(line):
+    """
+    Function to detect presence of tstat and msr_id fields in a DynaAdjust adj file
+    :param line: Measurement header line
+    :return: True/False switches for presence of tstat and msr_id fields
+    """
     t_stat_field = False
     msr_id_field = False
 
@@ -463,6 +774,14 @@ def read_msr_fields(line):
 
 
 def read_msr_line(line, tstat_switch, msr_id_switch):
+    """
+    Function to read msr components from a single line in adj file
+    :param line: Msr line in adj file
+    :param tstat_switch: True/False switch for presence of tstats
+    :param msr_id_switch: True/False switch for presence of msr_ids
+    :return: Dictionary of components
+    """
+
     msr_type = line[:1]
     stn1 = line[2:22].strip()
     stn2 = line[22:42].strip()
@@ -543,366 +862,43 @@ def read_msr_line(line, tstat_switch, msr_id_switch):
         return msr_components
 
 
-def read_adj(adj_file):
-
-    dyna_adj = DynaAdj()
-
-    with open(adj_file, 'r') as adj_fh:
-        line_count = 0
-        stn_line = None
-        stn_switch = False
-        mandatory_coord_types = 'PLHh'
-
-        msr_line = None
-        msr_switch = False
-        msr_count = 0
-        dir_set = 0
-        msr_header_line = None
-
-        metadata_switch = True
-
-        for line in adj_fh:
-            line_count += 1
-
-            if 'Adjusted Measurements' in line:
-                msr_line = line_count + 5
-                msr_header_line = line_count + 3
-                three_line_count = 0
-
-            if msr_line:
-                if line_count == msr_line:
-                    metadata_switch = False
-                    msr_switch = True
-
-            if msr_header_line:
-                if line_count == msr_header_line:
-                    tstat_switch, msr_id_switch = read_msr_fields(line)
-
-            if 'Adjusted Coordinates' in line:
-                stn_line = line_count + 5
-
-            if stn_line:
-                if line_count == stn_line:
-                    stn_switch = True
-
-            if metadata_switch:
-                if line[:35] == 'Version:                           ':
-                    dyna_adj.version = line[35:].strip()
-
-                if line[:35] == 'Reference frame:                   ':
-                    dyna_adj.reference_frame = line[35:].strip()
-
-                if line[:35] == 'File name:                         ':
-                    dyna_adj.file_name = line[35:].strip()
-
-                if line[:35] == 'File created:                      ':
-                    date_str = line[35:].strip()
-                    dyna_adj.file_date = datetime.datetime.strptime(date_str, '%A, %d %B %Y, %I:%M:%S %p')
-                    dyna_adj.file_name = line[35:].strip()
-
-                if line[:35] == 'Epoch:                             ':
-                    date_str = line[35:].strip()
-                    d = int(date_str[:2])
-                    m = int(date_str[3:5])
-                    y = int(date_str[6:])
-                    dyna_adj.epoch = datetime.date(y, m, d)
-
-                if line[:35] == 'Geoid model:                       ':
-                    dyna_adj.geoid_model = line[35:].strip()
-
-                if line[:35] == 'SOLUTION                           ':
-                    dyna_adj.soln_type = line[35:].strip()
-
-                if line[:35] == 'Total time                         ':
-                    items = line[35:].strip().split(':')
-                    hour = int(items[0])
-                    minute = int(items[1])
-                    second = float(items[2])
-                    dyna_adj.run_time = datetime.timedelta(hours=hour, minutes=minute, seconds=second)
-
-                if line[:35] == 'Number of unknown parameters       ':
-                    dyna_adj.parameters = int(line[35:])
-
-                if line[:35] == 'Number of measurements             ':
-                    items = line[35:].split()
-                    if len(items) > 1:
-                        if '(' in items[1]:
-                            outliers = int(items[1].replace('(', ''))
-                    dyna_adj.msr_count = int(items[0])
-                    dyna_adj.outlier_count = outliers
-
-                if line[:35] == 'Degrees of freedom                 ':
-                    dyna_adj.degrees_of_freedom = int(line[35:])
-
-                if line[:35] == 'Chi squared                        ':
-                    dyna_adj.chi_squared = float(line[35:])
-
-                if line[:35] == 'Rigorous Sigma Zero                ':
-                    dyna_adj.sigma_zero = float(line[35:])
-
-                if line[:35] == 'Global (Pelzer) Reliability        ':
-                    items = line[35:].strip().split()
-                    dyna_adj.global_pelzer = float(items[0])
-
-                if line[:35] == 'Chi-Square test (95.0%)            ':
-                    items = line[35:].strip().split()
-                    dyna_adj.chi_square_lower = float(items[0])
-                    dyna_adj.chi_square_upper = float(items[4])
-                    dyna_adj.chi_square_result = items[6].strip()
-
-                if line[:35] == 'Station coordinate types:          ':
-                    coord_types = line[35:].strip()
-                    missing_coord_types = set()
-                    for l in mandatory_coord_types:
-                        if l not in coord_types:
-                            missing_coord_types.add(l)
-                    if missing_coord_types:
-                        raise ValueError(f'Mandatory coordinate types {missing_coord_types} not present in {adj_file}')
-
-            if stn_switch:
-                if len(line) < 20:
-                    stn_switch = False
-                    continue
-
-                P = None
-                L = None
-                H = None
-                h = None
-
-                stn = line[0:20].strip()
-                con = line[20:23]
-                results = line[25:].split()
-                r_count = 0
-
-                for ct in coord_types:
-                    if ct == 'P':
-                        P = gc.dec2dms(gc.hp2dec(float(results[r_count])))
-                    if ct == 'L':
-                        L = gc.dec2dms(gc.hp2dec(float(results[r_count])))
-                    if ct == 'H':
-                        H = float(results[r_count])
-                    if ct == 'h':
-                        h = float(results[r_count])
-
-                    r_count += 1
-
-                # Don't forget about the qualities
-                sd_e = float(results[r_count])
-                sd_n = float(results[r_count + 1])
-                sd_u = float(results[r_count + 2])
-
-                # initialise a Station object in dictionary, then populate fields
-                dyna_adj.stns[stn] = dyna_adj.Station()
-                dyna_adj.stns[stn].name = stn
-                dyna_adj.stns[stn].con = con
-                dyna_adj.stns[stn].lat = P
-                dyna_adj.stns[stn].lon = L
-                dyna_adj.stns[stn].ehgt = h
-                dyna_adj.stns[stn].ohgt = H
-                dyna_adj.stns[stn].sd_e = sd_e
-                dyna_adj.stns[stn].sd_n = sd_n
-                dyna_adj.stns[stn].sd_u = sd_u
-
-            if msr_switch:
-                if line.strip() == '':
-                    msr_switch = False
-                    continue
-
-                msr_components = read_msr_line(line, tstat_switch, msr_id_switch)
-                msr_type = msr_components['msr_type']
-
-                # Direction sets - initialise new msr object
-                if msr_type == 'D':
-                    msr_count += 1
-                    dir_set += 1
-                    d_stn1 = msr_components['stn1']
-                    d_stn2 = msr_components['stn2']
-
-                    msr = dyna_adj.Measurement()
-                    msr.msr_type = msr_type
-                    msr.stn1 = d_stn1
-                    msr.stn2 = d_stn2
-                    msr.stn3 = []
-                    msr.ignore = []
-                    msr.msr = []
-                    msr.adj = []
-                    msr.cor = []
-                    msr.msr_sd = []
-                    msr.adj_sd = []
-                    msr.cor_sd = []
-                    msr.nstat = []
-                    msr.tstat = []
-                    msr.pelzer = []
-                    msr.pre_adj_cor = []
-                    msr.outlier = []
-                    msr.msr_id = []
-                    msr.cluster_id = []
-
-                    dyna_adj.msrs[msr_count] = msr
-
-                # Direction Set pointings - append msrs to lists
-                elif msr_type == ' ':
-                    dyna_adj.msrs[msr_count].stn3.append(msr_components['stn3'])
-                    dyna_adj.msrs[msr_count].ignore.append(msr_components['ignore'])
-                    dyna_adj.msrs[msr_count].msr.append(str_to_dms_angle(msr_components['msr']))
-                    dyna_adj.msrs[msr_count].adj.append(str_to_dms_angle(msr_components['adj']))
-                    dyna_adj.msrs[msr_count].cor.append(float(msr_components['cor']))
-                    dyna_adj.msrs[msr_count].msr_sd.append(float(msr_components['msr_sd']))
-                    dyna_adj.msrs[msr_count].adj_sd.append(float(msr_components['adj_sd']))
-                    dyna_adj.msrs[msr_count].cor_sd.append(float(msr_components['cor_sd']))
-                    dyna_adj.msrs[msr_count].nstat.append(float(msr_components['nstat']))
-                    if tstat_switch:
-                        dyna_adj.msrs[msr_count].tstat.append(float(msr_components['tstat']))
-                    else:
-                        dyna_adj.msrs[msr_count].tstat.append(None)
-                    dyna_adj.msrs[msr_count].pelzer.append(float(msr_components['pelzer']))
-                    dyna_adj.msrs[msr_count].pre_adj_cor.append(float(msr_components['pre_adj_cor']))
-                    dyna_adj.msrs[msr_count].outlier.append(msr_components['outlier'])
-                    dyna_adj.msrs[msr_count].msr_id.append(msr_components['msr_id'])
-                    dyna_adj.msrs[msr_count].cluster_id.append(msr_components['cluster_id'])
-
-                # Type X/Y/Z measurements (split over 3 lines)
-                elif msr_type in three_line_msrs:
-                    three_line_count += 1
-
-                    if three_line_count % 3 == 1:
-                        # re-initialise lists at new msr
-                        cardinal_list = []
-                        msr_list = []
-                        adj_list = []
-                        cor_list = []
-                        msr_sd_list = []
-                        adj_sd_list = []
-                        cor_sd_list = []
-                        nstat_list = []
-                        tstat_list = []
-                        pelzer_list = []
-                        pre_adj_cor_list = []
-                        outlier_list = []
-                        msr_id = msr_components['msr_id']
-                        cluster_id = msr_components['cluster_id']
-
-                    stn1 = msr_components['stn1']
-
-                    if msr_components['stn2'] != '':
-                        stn2 = msr_components['stn2']
-                    else:
-                        stn2 = None
-
-                    ignore = msr_components['ignore']
-
-                    cardinal_list.append(msr_components['cardinal'])
-                    msr_list.append(float(msr_components['msr']))
-                    adj_list.append(float(msr_components['adj']))
-                    cor_list.append(float(msr_components['cor']))
-                    msr_sd_list.append(float(msr_components['msr_sd']))
-                    adj_sd_list.append(float(msr_components['adj_sd']))
-                    cor_sd_list.append(float(msr_components['cor_sd']))
-                    nstat_list.append(float(msr_components['nstat']))
-                    if tstat_switch:
-                        tstat_list.append(float(msr_components['tstat']))
-                    else:
-                        tstat_list.append(None)
-                    pelzer_list.append(float(msr_components['pelzer']))
-                    pre_adj_cor_list.append(float(msr_components['pre_adj_cor']))
-                    outlier_list.append(msr_components['outlier'])
-
-                    if (three_line_count % 3) == 0:
-                        msr_count += 1
-
-                        msr = dyna_adj.Measurement()
-                        msr.msr_type = msr_type
-                        msr.stn1 = stn1
-                        msr.stn2 = stn2
-                        msr.stn3 = None
-                        msr.ignore = ignore
-                        msr.cardinal = cardinal_list
-                        msr.msr = msr_list
-                        msr.adj = adj_list
-                        msr.cor = cor_list
-                        msr.msr_sd = msr_sd_list
-                        msr.adj_sd = adj_sd_list
-                        msr.cor_sd = cor_sd_list
-                        msr.nstat = nstat_list
-                        msr.tstat = tstat_list
-                        msr.pelzer = pelzer_list
-                        msr.pre_adj_cor = pre_adj_cor_list
-                        msr.outlier = outlier_list
-                        msr.msr_id = msr_id
-                        msr.cluster_id = cluster_id
-
-                        dyna_adj.msrs[msr_count] = msr
-                    else:
-                        pass
-
-                # all other msr types
-                else:
-                    msr_count += 1
-                    msr = dyna_adj.Measurement()
-                    msr.msr_type = msr_type
-                    msr.stn1 = msr_components['stn1']
-                    msr.stn2 = msr_components['stn2']
-                    msr.stn3 = msr_components['stn3']
-                    msr.ignore = msr_components['ignore']
-                    msr.cardinal = msr_components['cardinal']
-                    if msr_type in angle_msrs:
-                        msr.msr = str_to_dms_angle(msr_components['msr'])
-                        msr.adj = str_to_dms_angle(msr_components['adj'])
-                    elif msr_type in hp_msrs:
-                        msr.msr = gc.hp2dec(msr_components['msr'])
-                        msr.adj = gc.hp2dec(msr_components['adj'])
-                    else:
-                        msr.msr = float(msr_components['msr'])
-                        msr.adj = float(msr_components['adj'])
-                    msr.cor = float(msr_components['cor'])
-                    msr.msr_sd = float(msr_components['msr_sd'])
-                    msr.adj_sd = float(msr_components['adj_sd'])
-                    msr.cor_sd = float(msr_components['cor_sd'])
-                    msr.nstat = float(msr_components['nstat'])
-                    if tstat_switch:
-                        msr.tstat = float(msr_components['tstat'])
-                    msr.pelzer = float(msr_components['pelzer'])
-                    msr.pre_adj_cor = float(msr_components['pre_adj_cor'])
-                    msr.outlier = msr_components['outlier']
-                    if msr_id:
-                        msr.msr_id = float(msr_components['msr_id'])
-                        msr.cluster_id = float(msr_components['cluster_id'])
-
-                    dyna_adj.msrs[msr_count] = msr
-
-    return dyna_adj
-
-
 # ----------------------------------------------------------------------
 # Sample usage
 # ----------------------------------------------------------------------
 
 adj_file = ''
+xyz_file = ''
+
+if xyz_file:
+    dyna_stations = DynaXYZ(xyz_file)
 
 if adj_file:
     # consume adj file
-    dyna_results = read_adj(adj_file)
+    if xyz_file:
+        dyna_results = DynaAdj(adj_file, dyna_stations.stations, dyna_stations.metadata)
+    else:
+        dyna_results = DynaAdj(adj_file)
 
     # print file metadata
     out_str = 'DynAdjust Network Metadata\n'
     out_str += '-'*80 + '\n'
     out_str += f'File name:           {dyna_results.file_name}\n'
     out_str += f'File date:           {dyna_results.file_date}\n'
-    out_str += f'Version:             {dyna_results.version}\n'
-    out_str += f'Reference Frame:     {dyna_results.reference_frame}\n'
-    out_str += f'Epoch:               {dyna_results.epoch}\n'
-    out_str += f'Geoid Model:         {dyna_results.geoid_model}\n'
-    out_str += f'Solution Type:       {dyna_results.soln_type}\n'
-    out_str += f'Run time:            {dyna_results.run_time}\n'
-    out_str += f'Measurements:        {dyna_results.msr_count}\n'
-    out_str += f'Parameters:          {dyna_results.parameters}\n'
-    out_str += f'Degrees of Freedom:  {dyna_results.degrees_of_freedom}\n'
-    out_str += f'Global Pelzer:       {dyna_results.global_pelzer}\n'
-    out_str += f'Potential Outliers:  {dyna_results.outlier_count}\n'
-    out_str += f'Chi Squared (95%):   {dyna_results.chi_squared}\n'
-    out_str += f'Chi Square window:   {dyna_results.chi_square_lower} - {dyna_results.chi_square_upper}\n'
-    out_str += f'Sigma Zero:          {dyna_results.sigma_zero}\n'
-    out_str += f'Chi Square Result:   {dyna_results.chi_square_result}\n'
+    out_str += f'Version:             {dyna_results.metadata.version}\n'
+    out_str += f'Reference Frame:     {dyna_results.metadata.reference_frame}\n'
+    out_str += f'Epoch:               {dyna_results.metadata.epoch}\n'
+    out_str += f'Geoid Model:         {dyna_results.metadata.geoid_model}\n'
+    out_str += f'Solution Type:       {dyna_results.adj_stats.soln_type}\n'
+    out_str += f'Run time:            {dyna_results.adj_stats.run_time}\n'
+    out_str += f'Measurements:        {dyna_results.adj_stats.msr_count}\n'
+    out_str += f'Parameters:          {dyna_results.adj_stats.parameters}\n'
+    out_str += f'Degrees of Freedom:  {dyna_results.adj_stats.degrees_of_freedom}\n'
+    out_str += f'Global Pelzer:       {dyna_results.adj_stats.global_pelzer}\n'
+    out_str += f'Potential Outliers:  {dyna_results.adj_stats.outlier_count}\n'
+    out_str += f'Chi Squared (95%):   {dyna_results.adj_stats.chi_squared}\n'
+    out_str += f'Chi Square window:   {dyna_results.adj_stats.chi_square_lower} - {dyna_results.adj_stats.chi_square_upper}\n'
+    out_str += f'Sigma Zero:          {dyna_results.adj_stats.sigma_zero}\n'
+    out_str += f'Chi Square Result:   {dyna_results.adj_stats.chi_square_result}\n'
     out_str += '-' * 80 + '\n'
 
     # print measurements
@@ -1070,4 +1066,4 @@ if adj_file:
     with open('adj_read.txt', 'w') as out_fh:
         out_fh.write(out_str)
 
-    write_shapefile(dyna_results, 'test_network')
+    write_adj_shapefile(dyna_results, 'test_network')
