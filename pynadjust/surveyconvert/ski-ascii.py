@@ -2,9 +2,12 @@
 
 """
 PynAdjust - Survey Convert - Leica Infinity SKI-ASCII Format Module
-Author - Nuddin Tengku (adopted from Josh Batchelor's tdef.py)
+Author - Ross Bugg (adopted from Nuddin Tengku's ski-ascii.py)
 Purpose - To provide functionality to enable conversion of SKI-ASCII (Leica Infinity output) GNSS data to DynaML format
 Notes - SKI-ASCII needs to be exported as 'WGS-84 Cartesian'
+
+MODIFIED CODE FROM ORIGINAL SKI-ASCII.py by Nuddin Tengku
+Modifications start at Line 104, Line 126 and Line 146
 
 For information about DynaML schema definition, see DynAdjust Users Guide Appendix B.3
 
@@ -19,7 +22,6 @@ from geodepy.transform import xyz2llh, geo2grid
 from geodepy.convert import dec2hp
 
 # Example 'Pynadjust\\tests\\resources\\skiasciisample.asc'
-
 
 def stn2xml(skiasciifile):
     # Create dynaxml root object
@@ -84,42 +86,47 @@ def msr2xml(skiasciifile):
     linebatch = 0
     # Measurement constants
     refframe = 'ITRF2014'
-    vscale = '100.0'
-    scale = '1.0'
+    vscale = '100.000'
+    scale = '1.000'
     for line in msrlines:
         linetype = line[0][0:2]
         if linetype == '@#':
-            # Start of line batch
+        
+       # Start of line batch
             linebatch += 1
-            # Add baseline when next batch of data is cycled
-            if linebatch >= 1 and len(linebatchdict[linebatch-1]) == 10:
-                msrroot = addgnssbaseline(msrroot, refframe, epoch, vscale, scale, scale, scale, firststn, secondstn,
-                                          x, y, z, sxx, sxy, sxz, syy, syz, szz)
-        if linebatch in linebatchdict:
-            linebatchdict[linebatch].append(line)
-        else:
-            linebatchdict[linebatch] = [line]
-        # Sigma a posteriori
+
+       # Sigma a posteriori
         if linetype == '@&' and linebatchdict[linebatch][0][4] == 'MEAS':
-            sxx = str(float(line[2])/(float(line[1])**2))
-            sxy = str(float(line[3])/(float(line[1])**2))
-            sxz = str(float(line[4])/(float(line[1])**2))
-            syy = str(float(line[5])/(float(line[1])**2))
-            syz = str(float(line[6])/(float(line[1])**2))
-            szz = str(float(line[7].rstrip())/(float(line[1])**2))
+            sxx = str(float(line[2])/(1/(float(line[1])**2)))
+            sxy = str(float(line[3])/(1/(float(line[1])**2)))
+            sxz = str(float(line[4])/(1/(float(line[1])**2)))
+            syy = str(float(line[5])/(1/(float(line[1])**2)))
+            syz = str(float(line[6])/(1/(float(line[1])**2)))
+            szz = str(float(line[7].rstrip())/(1/(float(line[1])**2)))
+            
         # Individual baseline information (Reference point of baseline and its coordinates)
-        if linetype == "@+":
+        if linetype == '@+':
             firststn = line[0][2:]
+            
         # Baseline vector components
         if linetype == "@-":
             secondstn = line[0][2:]
             x = line[1]
             y = line[2]
             z = line[3].rstrip()
+            
         # Date and time of first common epoch
         if linetype == '@*':
             epoch = line[0][2:]
-
+    
+        #Add baseline when next batch of data is cycled
+            msrroot = addgnssbaseline(msrroot, refframe, epoch, vscale, scale, scale, scale, firststn, secondstn,
+                                              x, y, z, sxx, sxy, sxz, syy, syz, szz)
+        if linebatch in linebatchdict:
+            linebatchdict[linebatch].append(line)
+        else:
+            linebatchdict[linebatch] = [line]
+    
     return msrroot
 
 
@@ -130,7 +137,8 @@ if __name__ == "__main__":
     msrroot = msr2xml(skiasciifile)
     stndata = ET.tostring(stnroot, pretty_print='True', xml_declaration='True', encoding='utf-8')
     msrdata = ET.tostring(msrroot, pretty_print='True', xml_declaration='True', encoding='utf-8')
-    with open(skiasciiname + 'stn.xml', 'wb') as stnxml:
+
+    with open(skiasciiname + '_stn.xml', 'wb') as stnxml:
         stnxml.write(stndata)
-    with open(skiasciiname + 'msr.xml', 'wb') as msrxml:
+    with open(skiasciiname + '_msr.xml', 'wb') as msrxml:
         msrxml.write(msrdata)
