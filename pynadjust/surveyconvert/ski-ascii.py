@@ -7,7 +7,6 @@ Purpose - To provide functionality to enable conversion of SKI-ASCII (Leica Infi
 Notes - SKI-ASCII needs to be exported as 'WGS-84 Cartesian'
 
 MODIFIED CODE FROM ORIGINAL SKI-ASCII.py by Nuddin Tengku
---> See Line 23 for a necessary Pynadjust module suggested location on your PC <--
 Modifications start at Line 104, Line 126 and Line 146
 
 For information about DynaML schema definition, see DynAdjust Users Guide Appendix B.3
@@ -18,10 +17,6 @@ https://github.com/icsm-au/DynAdjust/blob/master/resources/DynAdjust%20Users%20G
 
 import os
 import lxml.etree as ET
-import sys
-
-sys.path.append('C:/path-where-pynadjust-folder-is-located-suggest-/Python/site-packages')
-
 from pynadjust.surveyconvert.dynaml import *
 from geodepy.transform import xyz2llh, geo2grid
 from geodepy.convert import dec2hp
