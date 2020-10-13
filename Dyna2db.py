@@ -142,7 +142,11 @@ def msr_xml2db(f,db):
     if msr_cnt==None: msr_cnt=0
     add_tbl_clm('DNA_BASELINES',['MEASUREMENT_ID'],conn)
     add_tbl_clm('DNA_DIRECTIONS',['MEASUREMENT_ID'],conn)
-    for msr in xml['DnaXmlFormat']['DnaMeasurement']:
+    if type(xml['DnaXmlFormat']['DnaMeasurement'])==list:
+        m = xml['DnaXmlFormat']['DnaMeasurement']
+    else:
+        m = [xml['DnaXmlFormat']['DnaMeasurement']]
+    for msr in m:
         clms=[]
         dta=[]
         msr_cnt+=1
@@ -261,6 +265,9 @@ def import_apu(f,db):
     conn.close()
 
 if __name__ == "__main__":
+    script_path = os.path.abspath(os.path.realpath(__file__))
+    script_dir, script_name = os.path.split(script_path)
+    os.chdir(script_dir)
     networks =[s.replace('.stn.xml','') for s in os.listdir('.') if s.endswith('.stn.xml')]
     ######### Create a database and empty tables ############
     for network in networks:
