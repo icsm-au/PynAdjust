@@ -10,7 +10,9 @@ def delete_DynaML_db(db):
     cursor.execute('DROP TABLE IF EXISTS DNA_MEASUREMENT')
     cursor.execute('DROP TABLE IF EXISTS DNA_BASELINES')
     cursor.execute('DROP TABLE IF EXISTS DNA_DIRECTIONS')
+    cursor.execute('DROP TABLE IF EXISTS ADJ_STATION')
     cursor.execute('DROP TABLE IF EXISTS ADJ_MEASUREMENT')
+    cursor.execute('DROP TABLE IF EXISTS ADJ_ADJUSTMENT_STATS')
     cursor.execute('DROP TABLE IF EXISTS X_G_Y_COMPONENTS')
     cursor.execute('DROP TABLE IF EXISTS APU_STATION')
     conn.commit()
@@ -30,7 +32,11 @@ def create_DynaML_db(db):
                   ID integer PRIMARY KEY);''')
     cursor.execute('''CREATE TABLE IF NOT EXISTS DNA_DIRECTIONS (
                   ID integer PRIMARY KEY);''')
+    cursor.execute('''CREATE TABLE IF NOT EXISTS ADJ_STATION (
+                  ID integer PRIMARY KEY);''')
     cursor.execute('''CREATE TABLE IF NOT EXISTS ADJ_MEASUREMENT (
+                  ID integer PRIMARY KEY);''')
+    cursor.execute('''CREATE TABLE IF NOT EXISTS ADJ_ADJUSTMENT_STATS (
                   ID integer PRIMARY KEY);''')
     cursor.execute('''CREATE TABLE IF NOT EXISTS X_G_Y_COMPONENTS (
                   ID integer PRIMARY KEY);''')
@@ -45,10 +51,11 @@ def add_tbl_clm(tbl,clms,conn):
     cursor = conn.cursor()
     e_clms=cursor.execute('PRAGMA table_info('+tbl+')').fetchall()
     for c in clms:
-        add_c=False
+        add_c=True
+        if c =='': add_c=False
         for e in e_clms:
-            if c in e: add_c=True
-        if add_c==False:
+            if c in e: add_c=False
+        if add_c==True:
             sql='ALTER TABLE ' + tbl + ' ADD '
             sql= sql + c
             if (c =='M' 
@@ -69,6 +76,8 @@ def fmt4sql(stg):
             .replace('.','')
             .replace('-','_')
             .replace('(','_')
+            .replace(':',' ')
+            .replace('%','p')
             .replace(')',' ')
             .replace('M Station 1','M  Station 1')
             .upper())
@@ -84,7 +93,6 @@ def list2sql (clms):
         v = v + '?,'
     sql = sql[:-2] + ') VALUES ('+v[:-1] +')'     
     return sql
-
 
 
 def add_file_ref(f,tbl,conn):
@@ -123,7 +131,7 @@ def stn_xml2db (f,db):
         cursor.execute('INSERT INTO DNA_STATION '+sql, dta_stn)
     conn.commit()
     # Add the file name as a reference
-    add_file_ref(f,'DNA_MEASUREMENT',conn)
+    add_file_ref(f,'DNA_STATION',conn)
     conn.close()
     
 
@@ -142,10 +150,8 @@ def msr_xml2db(f,db):
     if msr_cnt==None: msr_cnt=0
     add_tbl_clm('DNA_BASELINES',['MEASUREMENT_ID'],conn)
     add_tbl_clm('DNA_DIRECTIONS',['MEASUREMENT_ID'],conn)
-    if type(xml['DnaXmlFormat']['DnaMeasurement'])==list:
-        m = xml['DnaXmlFormat']['DnaMeasurement']
-    else:
-        m = [xml['DnaXmlFormat']['DnaMeasurement']]
+    m = xml['DnaXmlFormat']['DnaMeasurement']
+    if type(m)!=list: m=[m]
     for msr in m:
         clms=[]
         dta=[]
@@ -185,27 +191,59 @@ def import_adj(f,db):
     if obs_id==None: obs_id=0
     obs_id=obs_id+1
     gnss_p=[]
+    tbl=''
     c_ln=-1
     with open(f, 'r') as adj_f:    
         for ln in adj_f.readlines():
-            if ln.strip()=='/n' or ln.strip()=='': continue
+            # Pause and skip line reading in following is true
+            if (ln.strip()=='/n' 
+             or ln.strip()==''): continue
+            if ln.startswith('+ Initialising adjustment'): c_ln=-1
             if ln.startswith('Adjusted Coordinates'): c_ln=-1
-            if ln.startswith('Station             Const      Latitude      Longitude   H(Ortho) h(Ellipse)'):
-                clms=fmt4sql(ln)
-                add_tbl_clm('ADJ' ,clms,conn)
+            if ln.startswith('Adjusted Measurements'): c_ln=-1
+
+            # Read in the adjustment Stats
+            if ln.startswith('DYNADJUST ADJUSTMENT OUTPUT FILE'):
+                tbl='ADJ_ADJUSTMENT_STATS'
+                stats_clms=[]; dta=[]
                 c_ln=2
-            if c_ln == 0 and clms[1]=='CONST':
-                dta=[(ln[:20].strip())]
-                dta = dta + ln[20:].split()
-                sql =list2sql(['FILE_ID'] + clms[:len(dta)-1])
-                cursor.execute('INSERT INTO ADJ '+sql, dta)                    
+            if ln.startswith('SOLUTION'):
+                c_ln=0
+            if (c_ln == 0 and tbl=='ADJ_ADJUSTMENT_STATS' 
+                and ln.startswith('--')==False):
+                c_n_d = fmt4sql(ln)
+                stats_clms = stats_clms + [c_n_d[0]]
+                dta = dta + [ln[ln.find('  '):].strip()]
+            if ln.startswith('Adjusted Measurements'):
+                add_tbl_clm(tbl,stats_clms,conn)
+                sql =list2sql(stats_clms)
+                cursor.execute('INSERT INTO ' +tbl+ ' ' +sql, dta)
+                
+            # Read in the coordinates (Stop at EOF)
+            if ln.startswith('Station             Const'):
+                tbl='ADJ_STATION'
+                clms=fmt4sql(ln)
+                add_tbl_clm(tbl ,clms,conn)
+                c_ln=2
+            if c_ln == 0 and tbl=='ADJ_STATION':
+                dta=[ln[:20].strip()]
+                dta=dta + ln[20:].split()
+                # join description if split by spaces
+                if len(dta)>len(clms): 
+                    desc=' '.join(dta[len(clms)-1:])
+                    dta=dta[:len(clms)]
+                    dta[len(clms)-1]=desc
+                sql =list2sql(clms[:len(dta)])
+                cursor.execute('INSERT INTO ' +tbl+ ' ' +sql, dta)
             
+            # Read in the measurements (Stop at 'Adjusted Coordinates')
             if ln.startswith('M Station 1           Station 2           Station 3'):
+                tbl='ADJ_MEASUREMENT'
                 clms=fmt4sql(ln)
                 add_tbl_clm('ADJ_MEASUREMENT' ,clms,conn)
                 add_tbl_clm('X_G_Y_COMPONENTS' ,fmt4sql(ln[65:]),conn)
                 c_ln=2
-            if c_ln == 0 and clms[0]=='M':
+            if c_ln == 0 and tbl=='ADJ_MEASUREMENT':
                 dta=[ln[:2].strip()]
                 dta.append(ln[2:20].strip())    #First
                 dta.append(ln[22:40].strip())   #second
@@ -236,6 +274,8 @@ def import_adj(f,db):
             if c_ln > 0: c_ln-=1
     conn.commit()
     # Add the file name as a reference
+    add_file_ref(f,'ADJ_ADJUSTMENT_STATS',conn)
+    add_file_ref(f,'ADJ_STATION',conn)
     add_file_ref(f,'ADJ_MEASUREMENT',conn)
     conn.close()
 
