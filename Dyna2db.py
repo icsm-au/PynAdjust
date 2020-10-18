@@ -1,3 +1,4 @@
+ 
 import os, sqlite3
 import xmltodict
 
@@ -6,14 +7,14 @@ def delete_DynaML_db(db):
     cursor = conn.cursor()
     cursor = conn.cursor()
     cursor.execute('DROP TABLE IF EXISTS FILES')
-    cursor.execute('DROP TABLE IF EXISTS DNA_STATION')
-    cursor.execute('DROP TABLE IF EXISTS DNA_MEASUREMENT')
-    cursor.execute('DROP TABLE IF EXISTS DNA_BASELINES')
-    cursor.execute('DROP TABLE IF EXISTS DNA_DIRECTIONS')
+    cursor.execute('DROP TABLE IF EXISTS STN_STATION')
+    cursor.execute('DROP TABLE IF EXISTS MSR_MEASUREMENT')
+    cursor.execute('DROP TABLE IF EXISTS MSR_BASELINES')
+    cursor.execute('DROP TABLE IF EXISTS MSR_DIRECTIONS')
     cursor.execute('DROP TABLE IF EXISTS ADJ_STATION')
     cursor.execute('DROP TABLE IF EXISTS ADJ_MEASUREMENT')
     cursor.execute('DROP TABLE IF EXISTS ADJ_ADJUSTMENT_STATS')
-    cursor.execute('DROP TABLE IF EXISTS X_G_Y_COMPONENTS')
+    cursor.execute('DROP TABLE IF EXISTS ADJ_X_G_Y_COMPONENTS')
     cursor.execute('DROP TABLE IF EXISTS APU_STATION')
     conn.commit()
     conn.close()
@@ -24,13 +25,13 @@ def create_DynaML_db(db):
     
     cursor.execute('''CREATE TABLE IF NOT EXISTS FILES (
                   ID integer PRIMARY KEY);''')
-    cursor.execute('''CREATE TABLE IF NOT EXISTS DNA_STATION (
+    cursor.execute('''CREATE TABLE IF NOT EXISTS STN_STATION (
                   ID integer PRIMARY KEY);''')
-    cursor.execute('''CREATE TABLE IF NOT EXISTS DNA_MEASUREMENT (
+    cursor.execute('''CREATE TABLE IF NOT EXISTS MSR_MEASUREMENT (
                   ID integer PRIMARY KEY);''')
-    cursor.execute('''CREATE TABLE IF NOT EXISTS DNA_BASELINES (
+    cursor.execute('''CREATE TABLE IF NOT EXISTS MSR_BASELINES (
                   ID integer PRIMARY KEY);''')
-    cursor.execute('''CREATE TABLE IF NOT EXISTS DNA_DIRECTIONS (
+    cursor.execute('''CREATE TABLE IF NOT EXISTS MSR_DIRECTIONS (
                   ID integer PRIMARY KEY);''')
     cursor.execute('''CREATE TABLE IF NOT EXISTS ADJ_STATION (
                   ID integer PRIMARY KEY);''')
@@ -38,7 +39,7 @@ def create_DynaML_db(db):
                   ID integer PRIMARY KEY);''')
     cursor.execute('''CREATE TABLE IF NOT EXISTS ADJ_ADJUSTMENT_STATS (
                   ID integer PRIMARY KEY);''')
-    cursor.execute('''CREATE TABLE IF NOT EXISTS X_G_Y_COMPONENTS (
+    cursor.execute('''CREATE TABLE IF NOT EXISTS ADJ_X_G_Y_COMPONENTS (
                   ID integer PRIMARY KEY);''')
     cursor.execute('''CREATE TABLE IF NOT EXISTS APU_STATION (
                   ID integer PRIMARY KEY);''')
@@ -125,13 +126,13 @@ def stn_xml2db (f,db):
             if k!='StationCoord':
                 dta_stn=dta_stn+[stn[k]]
                 if k not in clms:
-                    add_tbl_clm('DNA_STATION',[k],conn)
+                    add_tbl_clm('STN_STATION',[k],conn)
                     clms=clms+[k]
         sql =list2sql(clms)
-        cursor.execute('INSERT INTO DNA_STATION '+sql, dta_stn)
+        cursor.execute('INSERT INTO STN_STATION '+sql, dta_stn)
     conn.commit()
     # Add the file name as a reference
-    add_file_ref(f,'DNA_STATION',conn)
+    add_file_ref(f,'STN_STATION',conn)
     conn.close()
     
 
@@ -139,17 +140,17 @@ def msr_xml2db(f,db):
     ######## Open the msr file 
     ##         create table columns
     ##         every measurement is given a measurement number
-    ##         every measurement is added to the DNA_MEASUREMENT table
-    ##         the components of Directions and GNSS baselines are added to the DNA_DIRECTIONS and DNA_BASELINES tables
+    ##         every measurement is added to the MSR_MEASUREMENT table
+    ##         the components of Directions and GNSS baselines are added to the MSR_DIRECTIONS and MSR_BASELINES tables
     with open(f, 'r') as x:
         xml = xmltodict.parse(x.read())
 
     conn = sqlite3.connect(db)
     cursor = conn.cursor()
-    msr_cnt= cursor.execute("SELECT MAX(ID) FROM DNA_MEASUREMENT").fetchall()[0][0]
+    msr_cnt= cursor.execute("SELECT MAX(ID) FROM MSR_MEASUREMENT").fetchall()[0][0]
     if msr_cnt==None: msr_cnt=0
-    add_tbl_clm('DNA_BASELINES',['MEASUREMENT_ID'],conn)
-    add_tbl_clm('DNA_DIRECTIONS',['MEASUREMENT_ID'],conn)
+    add_tbl_clm('MSR_BASELINES',['MEASUREMENT_ID'],conn)
+    add_tbl_clm('MSR_DIRECTIONS',['MEASUREMENT_ID'],conn)
     m = xml['DnaXmlFormat']['DnaMeasurement']
     if type(m)!=list: m=[m]
     for msr in m:
@@ -158,29 +159,29 @@ def msr_xml2db(f,db):
         msr_cnt+=1
         for k1 in msr:
             if k1=='Directions':
-                add_tbl_clm('DNA_DIRECTIONS',list(msr[k1].keys()),conn)
+                add_tbl_clm('MSR_DIRECTIONS',list(msr[k1].keys()),conn)
                 sql =list2sql(['MEASUREMENT_ID']+list(msr[k1].keys()))
-                cursor.execute('INSERT INTO DNA_DIRECTIONS '+
+                cursor.execute('INSERT INTO MSR_DIRECTIONS '+
                                sql, [msr_cnt]+list(msr[k1].values()))
             
             elif k1=='GPSBaseline':
-                add_tbl_clm('DNA_BASELINES',list(msr[k1].keys()),conn)
+                add_tbl_clm('MSR_BASELINES',list(msr[k1].keys()),conn)
                 sql =list2sql(['MEASUREMENT_ID']+list(msr[k1].keys()))
-                cursor.execute('INSERT INTO DNA_BASELINES '+
+                cursor.execute('INSERT INTO MSR_BASELINES '+
                                sql, [msr_cnt]+list(msr[k1].values()))
                 
             else:
                 if k1 not in clms: 
-                    add_tbl_clm('DNA_MEASUREMENT',[k1],conn)
+                    add_tbl_clm('MSR_MEASUREMENT',[k1],conn)
                     clms=clms+[k1]
                 dta=dta + [msr[k1]]
         sql =list2sql(clms)
-        cursor.execute('INSERT INTO DNA_MEASUREMENT '+
+        cursor.execute('INSERT INTO MSR_MEASUREMENT '+
                        sql, dta)
         
     conn.commit()
     # Add the file name as a reference
-    add_file_ref(f,'DNA_MEASUREMENT',conn)
+    add_file_ref(f,'MSR_MEASUREMENT',conn)
     conn.close()
 
 def import_adj(f,db):
@@ -190,7 +191,7 @@ def import_adj(f,db):
     obs_id = cursor.execute("SELECT MAX(ID) FROM ADJ_MEASUREMENT").fetchall()[0][0]
     if obs_id==None: obs_id=0
     obs_id=obs_id+1
-    gnss_p=[]
+    gnss_p=[], prev_dta=[]
     tbl=''
     c_ln=-1
     with open(f, 'r') as adj_f:    
@@ -241,7 +242,6 @@ def import_adj(f,db):
                 tbl='ADJ_MEASUREMENT'
                 clms=fmt4sql(ln)
                 add_tbl_clm('ADJ_MEASUREMENT' ,clms,conn)
-                add_tbl_clm('X_G_Y_COMPONENTS' ,fmt4sql(ln[65:]),conn)
                 c_ln=2
             if c_ln == 0 and tbl=='ADJ_MEASUREMENT':
                 dta=[ln[:2].strip()]
@@ -253,23 +253,34 @@ def import_adj(f,db):
                     try: dta.append(float(e))
                     except ValueError: dta.append(e)
                 if dta[0] == 'X' or dta[0] == 'Y' or dta[0] == 'G':
-                    xgy=[obs_id]+ln[61:].split()                   
-                    add_tbl_clm('X_G_Y_COMPONENTS',['OBSERVATION_ID'],conn)
-                    sql =list2sql(['OBSERVATION_ID']+clms[4:len(xgy)+3])
-                    cursor.execute('INSERT INTO X_G_Y_COMPONENTS '+sql, xgy)
-                    gnss_p.append(dta)
+                    #Only commit one line for each measurement to the measurement table
+                    #Commit the 3 Components to the components table.
+                    xgy=[obs_id]+dta[4:]  
+                    xyg_clms=['OBSERVATION_ID']+clms[4:]
+                    add_tbl_clm('ADJ_X_G_Y_COMPONENTS',xyg_clms,conn)
+                    sql =list2sql(xyg_clms[:len(xgy)])
+                    cursor.execute('INSERT INTO ADJ_X_G_Y_COMPONENTS '
+                                   +sql, xgy[:len(xyg_clms)])
+                    gnss_p.append(dta[7:])
+                    #calculate averages for the 3 components
                     if len(gnss_p)==3:
                         dta[4]='Avg'
-                        for c in range(5,7):
-                            dta[c]=''
-                        for c in range(7,len(gnss_p[0])-2):
-                            avg_xgy=sum(row[c] for row in gnss_p)/3
-                            dta[c]=round(avg_xgy,4)
+                        dta[5]=''
+                        dta[6]=''
+                        dta=dta[:7]
+                        for r1, r2, r3 in zip(gnss_p[0], gnss_p[1], gnss_p[2]):
+                            if type(r1)!=str and type(r2)!=str and type(r3)!=str:
+                                avg_xgy=(r1 + r2 + r3)/3
+                                dta=dta+[round(avg_xgy,4)]
+                            else:
+                                dta=dta+[r1 + r2 + r3]
                         gnss_p=[]
-
+                                    
                 if len(gnss_p)==0:
                     sql = list2sql(clms[:len(dta)])
-                    cursor.execute('INSERT INTO ADJ_MEASUREMENT '+sql, dta)                    
+                    cursor.execute('INSERT INTO ADJ_MEASUREMENT '
+                                   +sql, dta[:len(clms)])
+                    obs_id+=1
                 
             if c_ln > 0: c_ln-=1
     conn.commit()
@@ -308,19 +319,22 @@ if __name__ == "__main__":
     script_path = os.path.abspath(os.path.realpath(__file__))
     script_dir, script_name = os.path.split(script_path)
     os.chdir(script_dir)
-    networks =[s.replace('.stn.xml','') for s in os.listdir('.') if s.endswith('.stn.xml')]
+    files = os.listdir('.')
     ######### Create a database and empty tables ############
-    for network in networks:
-        create_DynaML_db(network+'.db')
-        
-        if os.path.exists(network+'.stn.xml'):
-            stn_xml2db (network+'.stn.xml',network+'.db')
-      
-        if os.path.exists(network+'.msr.xml'):
-            msr_xml2db (network+'.msr.xml',network+'.db')
+    create_DynaML_db('Dyna.db')
+    conn = sqlite3.connect('Dyna.db')
+    conn.close()
+    db='Dyna.db'
     
-        if os.path.exists(network+'.phased-stage.adj'):
-            import_adj (network+'.phased-stage.adj',network+'.db')
+    for f in files:
+        if f.endswith('.stn.xml'):
+            stn_xml2db (f,'Dyna.db')
+      
+        if f.endswith('.msr.xml'):
+            msr_xml2db (f,'Dyna.db')
+    
+        if f.endswith('.adj'):
+            import_adj (f,'Dyna.db')
 
-        if os.path.exists(network+'.phased-stage.apu'):
-            import_apu (network+'.phased-stage.apu',network+'.db')    
+        if f.endswith('apu'):
+            import_apu (f,'Dyna.db')   
