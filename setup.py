@@ -1,4 +1,4 @@
-from setuptools import setup
+from setuptools import setup, find_packages
 
 setup(name='pynadjust',
       version='0.0.1',
@@ -9,5 +9,5 @@ setup(name='pynadjust',
       author='ICSM Australia',
       author_email='geodesy@ga.gov.au',
       license='Apache License 2.0',
-      packages=['pynadjust'],
+      packages=find_packages(),
       install_requires=['geodepy', 'pyshp', 'numpy'])
