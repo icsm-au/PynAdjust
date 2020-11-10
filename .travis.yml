@@ -31,7 +31,7 @@ script:
 deploy:
   provider: pypi
   # Deploy to test version of pypi - remove for official deployment
-  server: https://test.pypi.org/pypi
+  server: https://test.pypi.org/legacy/
   on:
     tags: true
   user:
