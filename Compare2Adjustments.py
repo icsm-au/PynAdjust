@@ -5,9 +5,11 @@
 #    Date:  12 March 2020
 # Purpose:  Script to create stn/msr shapefiles from DynAdjust .adj file
 # ----------------------------------------------------------------------
-#   Usage:  cmd:\> python Compare2Adjustments.py <*.adj_file1> <*.adj_file2>
+#   Usage:  cmd:\> python Compare2Adjustments.py <*.adj_file1> <*.adj_files[1]>
 #           Or
 #           cmd:\> python Compare2Adjustments.py <*.adj_file1>
+#           Or
+#           cmd:\> python Compare2Adjustments.py (This will find the 2 adj files in the script directory
 # ----------------------------------------------------------------------
 #   Notes:  - Currently handles the following msr types and produces these shp files
 #                         Azimuths_TYPE_B_K_V_Z
@@ -131,14 +133,12 @@ def hms2dd(HMS_Ang):
 ######################## Compare two adjustments ##############################
 ###############################################################################
 
-adj_file1 ='20200320_(03)_WA_GDA2020.phased-stage.adj'
-adj_file2 ='20200330_(03)_WA_GDA2020.phased-stage.adj'
-if len(sys.argv)==2: adj_file1=sys.argv[1]; adj_file2 =sys.argv[1]
-if len(sys.argv)==3: adj_file1=sys.argv[1]; adj_file2 =sys.argv[2]
-adj_files=[adj_file1,adj_file2]
+adj_files =[s for s in os.listdir(sys.path[0]) if s.endswith('.adj')]
+if len(adj_files)==1: adj_files = adj_files + adj_files 
+if len(sys.argv)==3: adj_files=[sys.argv[1],sys.argv[2]]
 
-apu_file1 = adj_file1.replace('.adj','_typeB.apu') if os.path.isfile(adj_file1.replace('.adj','_typeB.apu')) else adj_file1.replace('.adj','.apu')
-apu_file2 = adj_file2.replace('.adj','_typeB.apu') if os.path.isfile(adj_file2.replace('.adj','_typeB.apu')) else adj_file2.replace('.adj','.apu')
+apu_file1 = adj_files[0].replace('.adj','_typeB.apu') if os.path.isfile(adj_files[0].replace('.adj','_typeB.apu')) else adj_files[0].replace('.adj','.apu')
+apu_file2 = adj_files[1].replace('.adj','_typeB.apu') if os.path.isfile(adj_files[1].replace('.adj','_typeB.apu')) else adj_files[1].replace('.adj','.apu')
 apu_files=[apu_file1,apu_file2]
 
 ###############################################################################
@@ -461,13 +461,13 @@ for row in qry:
     if row[7]is not None and row[3]is not None and row[10]is not None and row[6]is not None:
         Mag_Coord_Chg=vincenty_inverse((row[7], row[8]),(row[3], row[4]))
         Mag_Vt_Chg=row[10]-row[6]
-    if row[11]is not None and row[16]is not None and row[11]!=0:
+    if row[11]is not None and row[16]is not None and row[11]!=0 and row[12]!=0:
         Mag_PU_Chg=row[16]-row[11]
         PER_Coord_v_PU=round((Mag_Coord_Chg[0]/row[11])*100,2)
         PER_PU_v_PU=round((Mag_PU_Chg/row[11])*100,2)
         Mag_Vt_Chg=row[10]-row[6]
         Mag_vPU_Chg=row[17]-row[12]
-        PER_Vt_v_vPU=(Mag_Vt_Chg/row[12])*100
+        PER_Vt_v_vPU=round((Mag_Vt_Chg/row[12])*100,2)
     w1.record(row[0], row[1], row[2], row[3], row[4], row[5], row[6], row[7], row[8], row[9], row[10], \
               row[11], row[12], row[13], row[14], row[15], row[16], row[17], row[18], row[19], row[20], \
               Mag_Coord_Chg[0], Mag_Coord_Chg[1], Mag_PU_Chg, PER_Coord_v_PU, PER_PU_v_PU,Mag_Vt_Chg,Mag_vPU_Chg,PER_Vt_v_vPU)
