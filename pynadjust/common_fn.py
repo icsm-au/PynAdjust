@@ -23,7 +23,7 @@ def write_prj(file_name, ref_frame=None):
     else:
         out_str = None
 
-    if not out_str:
+    if out_str:
         prj_fh = open(file_name + '.prj', 'w')
         prj_fh.write(out_str)
         prj_fh.close()
