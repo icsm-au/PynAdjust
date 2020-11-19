@@ -1,12 +1,12 @@
-# pynadjust apu module - retrieve data from .apu files
+# pynadjust apu module - retrieve data from DynAdjust .apu files
 
 import geodepy.convert as gc
 import numpy as np
 import geodepy.statistics as gstat
 import scipy.spatial as sspat
-from pynadjust_classes import Station, DynaMetadata
-import common_fn
-import xyz
+from pynadjust.pynadjust_classes import Station, DynaMetadata, Switches
+import pynadjust.common_fn as pcommon
+import pynadjust.xyz as pxyz
 
 # ----------------------------------------------------------------------
 # Classes and functions
@@ -29,9 +29,9 @@ class DynaApu(object):
             """
 
             with open(apu_file) as apu_fh:
-                metadata_switch = True
+                switches = Switches()
+                switches.header = True
                 rotate_vcv = False
-                pu_switch = False
                 pu_line = None
                 cov_count = 0
 
@@ -53,18 +53,18 @@ class DynaApu(object):
 
                 for line_count, line in enumerate(apu_fh):
 
-                    if metadata_switch:
-                        version = common_fn.read_metadata(line, 'Version:', version)
-                        file_name = common_fn.read_metadata(line, 'File name:', file_name)
-                        file_date = common_fn.read_file_date(line, file_date)
-                        confidence_interval = common_fn.read_metadata(line, 'PU confidence interval', confidence_interval)
-                        variance_matrix_units = common_fn.read_metadata(line, 'Variance matrix units ', variance_matrix_units)
-                        vcv_blocks = common_fn.read_metadata_tf(line, 'Stations printed in blocks', vcv_blocks)
-                        full_covariance_matrix = common_fn.read_metadata_tf(line, 'Full covariance matrix', full_covariance_matrix)
+                    if switches.header:
+                        version = pcommon.read_metadata(line, 'Version:', version)
+                        file_name = pcommon.read_metadata(line, 'File name:', file_name)
+                        file_date = pcommon.read_file_date(line, file_date)
+                        confidence_interval = pcommon.read_metadata(line, 'PU confidence interval', confidence_interval)
+                        variance_matrix_units = pcommon.read_metadata(line, 'Variance matrix units ', variance_matrix_units)
+                        vcv_blocks = pcommon.read_metadata_tf(line, 'Stations printed in blocks', vcv_blocks)
+                        full_covariance_matrix = pcommon.read_metadata_tf(line, 'Full covariance matrix', full_covariance_matrix)
 
                         if "Positional uncertainty of adjusted station coordinates" in line:
                             pu_line = line_count + 5
-                            metadata_switch = False
+                            switches.reset()
                             if variance_matrix_units == 'ENU':
                                 rotate_vcv = True
                             if read_metadata:
@@ -78,14 +78,15 @@ class DynaApu(object):
 
                     if pu_line:
                         if line_count == pu_line:
-                            pu_switch = True
+                            switches.stns = True
 
-                    if pu_switch:
+                    if switches.stns:
                         if line == '\n':
                             continue
 
-                        if 'block' in line.lower():
-                            continue
+                        if 'Block ' in line:
+                            if len(line) < 30:
+                                continue
 
                         if '-'*30 in line:
                             continue
@@ -364,11 +365,11 @@ apu_file = ''
 xyz_file = ''
 
 if xyz_file:
-    xyz_results = xyz.DynaXYZ(xyz_file)
+    xyz_results = pxyz.DynaXYZ(xyz_file)
 
 if apu_file:
     if xyz_file:
-        apu_results = DynaApu(apu_file, xyz_results.stations, xyz_results.metadata)
+        apu_results = DynaApu(apu_file, xyz_results.stns, xyz_results.metadata)
     else:
         apu_results = DynaApu(apu_file)
 
@@ -447,11 +448,11 @@ if apu_file:
         )
 
     # write to file
-    with open('apu_results.txt', 'w') as out_fh:
+    with open('pynadjust_apu.txt', 'w') as out_fh:
         out_fh.write(out_str)
 
     # write shapefiles
-    common_fn.write_stns_shapefile(apu_results.stns, 'apu_results', ref_frame=apu_results.metadata.reference_frame)
+    pcommon.write_stns_shapefile(apu_results.stns, 'apu_results', ref_frame=apu_results.metadata.reference_frame)
 
     # # retrieve specific stations and write to file - caution: requested stations must be present in file
     # r_stns = retrieve_stns(apu_results, 'ARMD', 'TS7379')
@@ -461,3 +462,4 @@ if apu_file:
     #     out_fh.write(out_str)
     #     for r in r_stns:
     #         print(r.name, r.lat.dec(), r.lon.dec(), r.hpu, r.vpu, r.smaj, r.smin, r.brg, sep=',', file=out_fh)
+
