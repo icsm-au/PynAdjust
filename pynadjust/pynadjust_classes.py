@@ -4,7 +4,9 @@ import geodepy.convert as gc
 
 
 class Station(object):
-    def __init__(self, name, description, con, lat, lon, ohgt, ehgt, sd_e, sd_n, sd_u, hpu, vpu, smaj, smin, brg, vcv, covariances):
+    def __init__(self, name=None, description=None, con=None, lat=None, lon=None, ohgt=None, ehgt=None,
+                 sd_e=None, sd_n=None, sd_u=None, hpu=None, vpu=None, smaj=None, smin=None, brg=None, vcv=None,
+                 covariances=None):
         self.name = name
         self.description = description
         self.con = con
@@ -36,5 +38,15 @@ class DynaMetadata(object):
         self.reference_frame = reference_frame
         self.geoid_model = geoid_model
         self.version = version
-        # self.file_name = file_name
-        # self.file_date = file_date
+
+
+class Switches(object):
+    def __init__(self, stns=False, msrs=False, header=False):
+        self.stns = stns
+        self.msrs = msrs
+        self.header = header
+
+    def reset(self):
+        self.stns = False
+        self.msrs = False
+        self.header = False
