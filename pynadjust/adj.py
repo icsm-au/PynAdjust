@@ -1,4 +1,4 @@
-# pynadjust adj module - retrieve data from .adj files
+# pynadjust adj module - retrieve data from DynAdjust.adj files
 
 # For review/consideration:
 #     - Confirm all measurement types and components read and stored correctly (test on adj will all msr types)
@@ -9,9 +9,10 @@ import datetime
 import geodepy.convert as gc
 import shapefile
 import os
-import common_fn
-from pynadjust_classes import Station, DynaMetadata
-from xyz import read_coord_elements, DynaXYZ
+import pynadjust.common_fn as common_fn
+from pynadjust.pynadjust_classes import Station, DynaMetadata, Switches
+from pynadjust.xyz import read_coord_elements, DynaXYZ
+import re
 
 # ----------------------------------------------------------------------
 # sets for various msr types
@@ -52,6 +53,7 @@ class DynaAdj(object):
 
             stns = {}
             msrs = {}
+
             version = None
             reference_frame = None
             file_name = None
@@ -72,16 +74,15 @@ class DynaAdj(object):
             chi_square_result = None
 
             with open(adj_file, 'r') as adj_fh:
+                switches = Switches()
+                switches.header = True
                 stn_line = None
-                stn_switch = False
                 mandatory_coord_types = 'PLHh'
 
                 msr_line = None
-                msr_switch = False
                 msr_count = 0
                 dir_set = 0
                 msr_header_line = None
-                metadata_switch = True
 
                 for line_count, line in enumerate(adj_fh):
 
@@ -92,24 +93,8 @@ class DynaAdj(object):
 
                     if msr_line:
                         if line_count == msr_line:
-                            metadata_switch = False
-                            metadata = DynaMetadata(epoch=epoch, reference_frame=reference_frame, geoid_model=geoid_model, version=version)
-                            adj_stats = DynaAdj.AdjStats(
-                                soln_type=soln_type,
-                                run_time=run_time,
-                                parameters=parameters,
-                                msr_count=msr_count,
-                                degrees_of_freedom=degrees_of_freedom,
-                                sigma_zero=sigma_zero,
-                                chi_squared=chi_squared,
-                                outlier_count=outlier_count,
-                                global_pelzer=global_pelzer,
-                                chi_square_lower=chi_square_lower,
-                                chi_square_upper=chi_square_upper,
-                                chi_square_result=chi_square_result
-                            )
-
-                            msr_switch = True
+                            switches.reset()
+                            switches.msrs = True
 
                     if msr_header_line:
                         if line_count == msr_header_line:
@@ -124,9 +109,10 @@ class DynaAdj(object):
                                 desc_index = line.find('Description')
 
                             if line_count == stn_line:
-                                stn_switch = True
+                                switches.reset()
+                                switches.stns = True
 
-                    if metadata_switch:
+                    if switches.header:
                         if read_metadata:
                             version = common_fn.read_metadata(line, 'Version:', version)
                             reference_frame = common_fn.read_metadata(line, 'Reference frame:', reference_frame)
@@ -155,18 +141,17 @@ class DynaAdj(object):
                             if len(items) > 1:
                                 if '(' in items[1]:
                                     outliers = int(items[1].replace('(', ''))
+                            else:
+                                outliers = 0
                             msr_count = int(items[0])
                             outlier_count = outliers
 
                         if line[:35] == 'Global (Pelzer) Reliability        ':
                             items = line[35:].strip().split()
-                            global_pelzer = float(items[0])
-
-                        if line[:35] == 'Chi-Square test (95.0%)            ':
-                            items = line[35:].strip().split()
-                            chi_square_lower = float(items[0])
-                            chi_square_upper = float(items[4])
-                            chi_square_result = items[6].strip()
+                            try:
+                                global_pelzer = float(items[0])
+                            except ValueError:
+                                global_pelzer = float('NaN')
 
                         if line[:35] == 'Station coordinate types:          ':
                             coord_types = line[35:].strip()
@@ -175,20 +160,47 @@ class DynaAdj(object):
                                 if l not in coord_types:
                                     missing_coord_types.add(l)
                             if missing_coord_types:
-                                raise ValueError(f'Mandatory coordinate types {missing_coord_types} not present in {adj_file}')
+                                raise ValueError(f'Mandatory coordinate types {missing_coord_types} '
+                                                 f'not present in {adj_file}')
 
-                    if stn_switch:
+                        # last header category, write to metadata object
+                        if line[:35] == 'Chi-Square test (95.0%)            ':
+                            items = line[35:].strip().split()
+                            chi_square_lower = float(items[0])
+                            chi_square_upper = float(items[4])
+                            chi_square_result = items[6].strip()
+
+                            metadata = DynaMetadata(epoch=epoch, reference_frame=reference_frame,
+                                                    geoid_model=geoid_model, version=version)
+                            adj_stats = DynaAdj.AdjStats(
+                                soln_type=soln_type,
+                                run_time=run_time,
+                                parameters=parameters,
+                                msr_count=msr_count,
+                                degrees_of_freedom=degrees_of_freedom,
+                                sigma_zero=sigma_zero,
+                                chi_squared=chi_squared,
+                                outlier_count=outlier_count,
+                                global_pelzer=global_pelzer,
+                                chi_square_lower=chi_square_lower,
+                                chi_square_upper=chi_square_upper,
+                                chi_square_result=chi_square_result
+                            )
+
+                            switches.reset()
+
+                    if switches.stns:
                         if len(line) < 20:
-                            stn_switch = False
+                            switches.reset()
                             continue
 
                         # store details as a Station object, leaving uncertainty fields null
                         stn_object = read_coord_elements(line, coord_types, desc_index)
                         stns[stn_object.name] = stn_object
 
-                    if msr_switch:
+                    if switches.msrs:
                         if line.strip() == '':
-                            msr_switch = False
+                            switches.reset()
                             continue
 
                         msr_components = read_msr_line(line, tstat_switch, msr_id_switch)
@@ -207,6 +219,7 @@ class DynaAdj(object):
                                 stn2=d_stn2,
                                 stn3=[],
                                 ignore=[],
+                                cardinal=[],
                                 msr=[],
                                 adj=[],
                                 cor=[],
@@ -245,7 +258,7 @@ class DynaAdj(object):
                             msrs[msr_count].msr_id.append(msr_components['msr_id'])
                             msrs[msr_count].cluster_id.append(msr_components['cluster_id'])
 
-                        # Type X/Y/Z measurements (split over 3 lines)
+                        # Type G/X/Y measurements (split over 3 lines)
                         elif msr_type in three_line_msrs:
                             three_line_count += 1
 
@@ -335,10 +348,8 @@ class DynaAdj(object):
 
                             if tstat_switch:
                                 tstat = float(msr_components['tstat'])
-
-                            if msr_id:
-                                msr_id = msr_components['msr_id']
-                                cluster_id = msr_components['cluster_id']
+                            else:
+                                tstat = None
 
                             msr_object = DynaAdj.Measurement(
                                 msr_type=msr_type,
@@ -358,8 +369,8 @@ class DynaAdj(object):
                                 pelzer=float(msr_components['pelzer']),
                                 pre_adj_cor=float(msr_components['pre_adj_cor']),
                                 outlier=msr_components['outlier'],
-                                msr_id=msr_id,
-                                cluster_id=cluster_id
+                                msr_id=msr_components['msr_id'],
+                                cluster_id=msr_components['cluster_id']
                             )
 
                             msrs[msr_count] = msr_object
@@ -374,11 +385,9 @@ class DynaAdj(object):
         if stns:
             read_stns = False
             self.stns = stns
-            print('carried across stations from xyz file')
         if metadata:
             read_metadata = False
             self.metadata = metadata
-            print('carried across metadata from xyz file')
 
         results = read_adj(filename, read_stns=read_stns, read_metadata=read_metadata)
 
@@ -396,7 +405,7 @@ class DynaAdj(object):
 
     class Measurement(object):
         def __init__(self, msr_type, stn1, stn2, stn3, ignore, cardinal, msr, adj, cor, msr_sd, adj_sd, cor_sd, nstat,
-                     tstat, pelzer, pre_adj_cor, outlier, msr_id, cluster_id):
+                     tstat, pelzer, pre_adj_cor, outlier, msr_id, cluster_id, epoch=None, source=None):
             self.msr_type = msr_type
             self.stn1 = stn1
             self.stn2 = stn2
@@ -416,6 +425,144 @@ class DynaAdj(object):
             self.outlier = outlier
             self.msr_id = msr_id
             self.cluster_id = cluster_id
+            self.epoch = epoch
+            self.source = source
+
+        def __repr__(self):
+            out_str = f'msr_type {self.msr_type}; stn1 {self.stn1}; stn2 {self.stn2}; stn3 {self.stn3}; ' \
+                      f'ignore {self.ignore}; cardinal {self.cardinal}; msr {self.msr}; adj {self.adj}; cor {self.cor}; ' \
+                      f'msr_sd {self.msr_sd}; adj_sd {self.adj_sd}; cor_sd {self.cor_sd}; nstat {self.nstat}; ' \
+                      f'self.tstat {self.tstat}; pelzer {self.pelzer}; pre_adj_cor {self.pre_adj_cor}; ' \
+                      f'outlier {self.outlier}; msr_id; {self.msr_id}; cluster_id; {self.cluster_id}; ' \
+                      f'epoch {self.epoch}; source {self.source}'
+
+            return out_str
+
+    def link_source_with_msr_id(self, xml_msr_file):
+        """
+        method to link the database id tags between msr.xml file and *.adj file to assign source and epoch to adjusted
+        measurements
+        :param xml_msr_file: measurement xml file
+        :return:
+        """
+
+        metadata = {}
+
+        with open(xml_msr_file, 'r') as msr_fh:
+            for line in msr_fh:
+                if '<DnaMeasurement>' in line:
+                    epoch = None
+                    source = None
+
+                if '<Source>' in line:
+                    source = re.findall("<Source>(.*?)</Source>", line)[0]
+                if '<Epoch>' in line:
+                    epoch = re.findall("<Epoch>(.*?)</Epoch>", line)[0]
+                if '<MeasurementID>' in line:
+                    msr_id = re.findall("<MeasurementID>(.*?)</MeasurementID>", line)[0]
+
+                    if msr_id in metadata:
+                        print(f' *** repeat occurance of msr_id: {msr_id}')
+                        exit()
+                    if msr_id != '':
+                        metadata[msr_id] = {
+                            'epoch': epoch,
+                            'source': source,
+                        }
+
+        for m in self.msrs.values():
+            msr_type = m.msr_type
+
+            if msr_type != 'D':
+                if m.msr_id in metadata:
+                    m.epoch = metadata[m.msr_id]['epoch']
+                    m.source = metadata[m.msr_id]['source']
+            else:
+                if m.msr_id:
+                    if m.msr_id[0] in metadata:
+                        m.epoch = metadata[m.msr_id[0]]['epoch']
+                        m.source = metadata[m.msr_id[0]]['source']
+
+    def compute_group_vf(self, source=None):
+        """
+        method to compute estimated variances factors for measurement groups.
+        Note: this computation assumes measurements are uncorrelated. use results with caution for correlated
+        measurement types e.g. X, D, etc.
+        :param source: Optional => Computation only performed on measurements in a specified source
+        :return:
+        """
+
+        def increment_vs2_sum(group_vf_dict, msr_type, vs2):
+            """
+            Function to increment the vs2 sum for group vf count
+            :param group_vf_dict:
+            :param msr_type:
+            :param vs2:
+            :return:
+            """
+            try:
+                group_vf_dict[msr_type]['count'] += 1
+                group_vf_dict[msr_type]['vs2'] += vs2
+            except KeyError:
+                group_vf_dict[msr_type] = {
+                    'count': 1,
+                    'vs2': vs2,
+                }
+
+        groups = {}
+
+        for msr in self.msrs.values():
+            if source:
+                if msr.source != source:
+                    continue
+
+            msr_type = msr.msr_type
+            if msr_type in three_line_msrs:
+                sum_vs2 = 0
+                # print(msr.cardinal)
+                for i in range(0, 3):
+                    msr_type = msr.msr_type + msr.cardinal[i]
+
+                    vs2 = (msr.cor[i] / msr.msr_sd[i]) ** 2
+                    sum_vs2 += vs2
+
+                    # add individual G/X/Y components
+                    increment_vs2_sum(groups, msr_type, vs2)
+
+                # add total G/X/Y
+                increment_vs2_sum(groups, msr.msr_type, sum_vs2)
+
+            elif msr_type in multi_line_msrs:
+                for i in range(len(msr.msr)):
+                    vs2 = (msr.cor[i] / msr.msr_sd[i]) ** 2
+                    increment_vs2_sum(groups, msr_type, vs2)
+
+            else:
+                vs2 = (msr.cor / msr.msr_sd) ** 2
+
+                increment_vs2_sum(groups, msr_type, vs2)
+
+        total_vs2 = 0
+        group_msr_count = 0
+        group_vs2 = 0
+        dof = float(self.adj_stats.degrees_of_freedom)
+        total_msrs = float(self.adj_stats.msr_count)
+        for msr_type in groups:
+            # exclude whole G/X/Y msrs. Their components are included in this summation.
+            if msr_type not in three_line_msrs:
+                total_vs2 += groups[msr_type]['vs2']
+                group_msr_count += groups[msr_type]['count']
+            else:
+                groups[msr_type]['count'] *= 3
+
+            gvf = (total_msrs * groups[msr_type]['vs2']) / (groups[msr_type]['count'] * dof)
+            groups[msr_type]['gvf'] = gvf
+
+            group_vs2 += groups[msr_type]['vs2']
+
+        est_vf = (total_msrs / group_msr_count) * (total_vs2 / dof)
+
+        return groups, est_vf
 
     class AdjStats(object):
         def __init__(self, soln_type, run_time, parameters, msr_count, degrees_of_freedom, sigma_zero, chi_squared,
@@ -767,8 +914,8 @@ def read_msr_fields(line):
     if 'T-stat' in line:
         t_stat_field = True
 
-    if 'Msr ID' in line:
-        msr_id_field = False
+    if 'Meas. ID' in line:
+        msr_id_field = True
 
     return t_stat_field, msr_id_field
 
@@ -875,7 +1022,7 @@ if xyz_file:
 if adj_file:
     # consume adj file
     if xyz_file:
-        dyna_results = DynaAdj(adj_file, dyna_stations.stations, dyna_stations.metadata)
+        dyna_results = DynaAdj(adj_file, dyna_stations.stns, dyna_stations.metadata)
     else:
         dyna_results = DynaAdj(adj_file)
 
@@ -902,136 +1049,137 @@ if adj_file:
     out_str += '-' * 80 + '\n'
 
     # print measurements
-    out_str += '\n\nMeasurements\n'
-    out_str += 'M {:20s} {:20s} {:20s} {:>2s} {:>2s} {:>16s} {:>16s}\n'.format(
-        'Station 1',
-        'Station 2',
-        'Station 3',
-        '*',
-        'C',
-        'Measured',
-        'Adjusted',
-    )
-    out_str += '-' * 120 + '\n'
+    if dyna_results.msrs:
+        out_str += '\n\nMeasurements\n'
+        out_str += 'M {:20s} {:20s} {:20s} {:>2s} {:>2s} {:>16s} {:>16s}\n'.format(
+            'Station 1',
+            'Station 2',
+            'Station 3',
+            '*',
+            'C',
+            'Measured',
+            'Adjusted',
+        )
+        out_str += '-' * 120 + '\n'
 
-    for m in dyna_results.msrs.values():
-        if m.ignore:
-            ignore = '*'
-        else:
-            ignore = ''
+        for m in dyna_results.msrs.values():
+            if m.ignore:
+                ignore = '*'
+            else:
+                ignore = ''
 
-        # prepare msr/adj str
-        if m.msr_type in angle_msrs:
-            if m.msr_type != 'D':
-                msr_str = '  {:3d} {:2d} {:7.4f}'.format(m.msr.degree, m.msr.minute, m.msr.second)
-                adj_str = '  {:3d} {:2d} {:7.4f}'.format(m.adj.degree, m.adj.minute, m.adj.second)
-        else:
-            msr_str = str(m.msr)
-            adj_str = str(m.adj)
+            # prepare msr/adj str
+            if m.msr_type in angle_msrs:
+                if m.msr_type != 'D':
+                    msr_str = '  {:3d} {:2d} {:7.4f}'.format(m.msr.degree, m.msr.minute, m.msr.second)
+                    adj_str = '  {:3d} {:2d} {:7.4f}'.format(m.adj.degree, m.adj.minute, m.adj.second)
+            else:
+                msr_str = str(m.msr)
+                adj_str = str(m.adj)
 
-        # direction sets
-        if m.msr_type == 'D':
-            out_str += '{:s} {:20s} {:20s}\n'.format(m.msr_type, m.stn1, m.stn2)
-            for d in range(len(m.stn3)):
-                if m.ignore[d]:
-                    ignore = '*'
+            # direction sets
+            if m.msr_type == 'D':
+                out_str += '{:s} {:20s} {:20s}\n'.format(m.msr_type, m.stn1, m.stn2)
+                for d in range(len(m.stn3)):
+                    if m.ignore[d]:
+                        ignore = '*'
+                    else:
+                        ignore = ''
+
+                    out_str += '{:43s} {:20s} {:>2s} {:>2s}   {:3d} {:2d} {:7.4f}   {:3d} {:2d} {:7.4f}\n'.format(
+                        '',
+                        m.stn3[d],
+                        ignore,
+                        '',
+                        m.msr[d].degree,
+                        m.msr[d].minute,
+                        m.msr[d].second,
+                        m.adj[d].degree,
+                        m.adj[d].minute,
+                        m.adj[d].second
+                    )
+
+            # three line msrs (G/X/Y)
+            elif m.msr_type in three_line_msrs:
+                # G/X
+                if m.stn2:
+                    out_str += '{:s} {:20s} {:20s} {:20s} {:>2s} {:>2s} {:16.4f} {:16.4f}\n'.format(
+                        m.msr_type,
+                        m.stn1,
+                        m.stn2,
+                        '',
+                        ignore,
+                        m.cardinal[0],
+                        m.msr[0],
+                        m.adj[0]
+                    )
+                    for i in range(1, 3):
+                        out_str += '{:64s} {:>2s} {:>2s} {:16.4f} {:16.4f}\n'.format(
+                            '',
+                            ignore,
+                            m.cardinal[i],
+                            m.msr[i],
+                            m.adj[i]
+                        )
+                # Y
                 else:
-                    ignore = ''
+                    out_str += '{:s} {:20s} {:20s} {:20s} {:>2s} {:>2s} {:16.4f} {:16.4f}\n'.format(
+                        m.msr_type,
+                        m.stn1,
+                        '',
+                        '',
+                        ignore,
+                        m.cardinal[0],
+                        m.msr[0],
+                        m.adj[0]
+                    )
+                    for i in range(1, 3):
+                        out_str += '{:64s} {:>2s} {:>2s} {:16.4f} {:16.4f}\n'.format(
+                            '',
+                            ignore,
+                            m.cardinal[i],
+                            m.msr[i],
+                            m.adj[i]
+                        )
 
-                out_str += '{:43s} {:20s} {:>2s} {:>2s}   {:3d} {:2d} {:7.4f}   {:3d} {:2d} {:7.4f}\n'.format(
-                    '',
-                    m.stn3[d],
+            # single-line three-stn msrs
+            elif m.stn3:
+                out_str += '{:s} {:20s} {:20s} {:20s} {:>2s} {:>2s} {:16s} {:16s}\n'.format(
+                    m.msr_type,
+                    m.stn1,
+                    m.stn2,
+                    m.stn3,
                     ignore,
-                    '',
-                    m.msr[d].degree,
-                    m.msr[d].minute,
-                    m.msr[d].second,
-                    m.adj[d].degree,
-                    m.adj[d].minute,
-                    m.adj[d].second
+                    m.cardinal,
+                    msr_str,
+                    adj_str
                 )
 
-        # three line msrs (G/X/Y)
-        elif m.msr_type in three_line_msrs:
-            # G/X
-            if m.stn2:
-                out_str += '{:s} {:20s} {:20s} {:20s} {:>2s} {:>2s} {:16.4f} {:16.4f}\n'.format(
+            # single-line two-stn msrs
+            elif m.stn2:
+                out_str += '{:s} {:20s} {:20s} {:20s} {:>2s} {:>2s} {:>16s} {:>16s}\n'.format(
                     m.msr_type,
                     m.stn1,
                     m.stn2,
                     '',
                     ignore,
-                    m.cardinal[0],
-                    m.msr[0],
-                    m.adj[0]
+                    m.cardinal,
+                    msr_str,
+                    adj_str
                 )
-                for i in range(1, 3):
-                    out_str += '{:64s} {:>2s} {:>2s} {:16.4f} {:16.4f}\n'.format(
-                        '',
-                        ignore,
-                        m.cardinal[i],
-                        m.msr[i],
-                        m.adj[i]
-                    )
-            # Y
+
+            # single-line one-stn msrs
             else:
-                out_str += '{:s} {:20s} {:20s} {:20s} {:>2s} {:>2s} {:16.4f} {:16.4f}\n'.format(
+                out_str += '{:s} {:20s} {:20s} {:20s} {:>2s} {:>2s} {:>16s} {:>16s}\n'.format(
                     m.msr_type,
                     m.stn1,
                     '',
                     '',
                     ignore,
-                    m.cardinal[0],
-                    m.msr[0],
-                    m.adj[0]
+                    m.cardinal,
+                    msr_str,
+                    adj_str
                 )
-                for i in range(1, 3):
-                    out_str += '{:64s} {:>2s} {:>2s} {:16.4f} {:16.4f}\n'.format(
-                        '',
-                        ignore,
-                        m.cardinal[i],
-                        m.msr[i],
-                        m.adj[i]
-                    )
-
-        # single-line three-stn msrs
-        elif m.stn3:
-            out_str += '{:s} {:20s} {:20s} {:20s} {:>2s} {:>2s} {:16s} {:16s}\n'.format(
-                m.msr_type,
-                m.stn1,
-                m.stn2,
-                m.stn3,
-                ignore,
-                m.cardinal,
-                msr_str,
-                adj_str
-            )
-
-        # single-line two-stn msrs
-        elif m.stn2:
-            out_str += '{:s} {:20s} {:20s} {:20s} {:>2s} {:>2s} {:>16s} {:>16s}\n'.format(
-                m.msr_type,
-                m.stn1,
-                m.stn2,
-                '',
-                ignore,
-                m.cardinal,
-                msr_str,
-                adj_str
-            )
-
-        # single-line one-stn msrs
-        else:
-            out_str += '{:s} {:20s} {:20s} {:20s} {:>2s} {:>2s} {:>16s} {:>16s}\n'.format(
-                m.msr_type,
-                m.stn1,
-                '',
-                '',
-                ignore,
-                m.cardinal,
-                msr_str,
-                adj_str
-            )
 
     # print adjusted coordinates
     if dyna_results.stns:
@@ -1063,7 +1211,7 @@ if adj_file:
 
         out_str += '\n'
 
-    with open('adj_read.txt', 'w') as out_fh:
+    with open('pynadjust_adj.txt', 'w') as out_fh:
         out_fh.write(out_str)
 
     write_adj_shapefile(dyna_results, 'test_network')
