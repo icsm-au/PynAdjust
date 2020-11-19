@@ -1,8 +1,8 @@
-# pynadjust xyz module - retrieve data from .xyz files
+# pynadjust xyz module - retrieve data from DynAdjust .xyz files
 
 import geodepy.convert as gc
-from pynadjust_classes import Station, DynaMetadata
-import common_fn
+from pynadjust.pynadjust_classes import Station, DynaMetadata, Switches
+import pynadjust.common_fn as common_fn
 
 
 class DynaXYZ(object):
@@ -27,10 +27,12 @@ class DynaXYZ(object):
             geoid_model = None
 
             with open(xyz_file, 'r') as xyz_fh:
+                switches = Switches()
+                switches.header = True
                 line_count = 0
                 stn_line = False
-                stn_switch = False
-                metadata_switch = True
+                # stn_switch = False
+                # metadata_switch = True
                 mandatory_coord_types = 'PLHh'
                 desc_index = None
 
@@ -45,13 +47,16 @@ class DynaXYZ(object):
                             desc_index = line.find('Description')
 
                         if line_count == stn_line:
-                            stn_switch = True
-                            metadata_switch = False
+                            switches.reset()
+                            switches.stns = True
+                            # stn_switch = True
+                            # metadata_switch = False
 
                             metadata = DynaMetadata(reference_frame=reference_frame, epoch=epoch,
                                                     geoid_model=geoid_model, version=version)
 
-                    if metadata_switch:
+                    if switches.header:
+                    # if metadata_switch:
                         version = common_fn.read_metadata(line, 'Version:', version)
                         reference_frame = common_fn.read_metadata(line, 'Reference frame:', reference_frame)
                         file_name = common_fn.read_metadata(line, 'File name:', file_name)
@@ -68,9 +73,11 @@ class DynaXYZ(object):
                             if missing_coord_types:
                                 raise ValueError(f'Mandatory coordinate types {missing_coord_types} not present in {xyz_file}')
 
-                    if stn_switch:
+                    # if stn_switch:
+                    if switches.stns:
                         if len(line) < 20:
-                            stn_switch = False
+                            switches.reset()
+                            # stn_switch = False
                             continue
 
                         stn_object = read_coord_elements(line, coord_types, desc_index)
@@ -80,7 +87,7 @@ class DynaXYZ(object):
             return stns, file_name, file_date, metadata
 
         results = read_xyz(filename)
-        self.stations = results[0]
+        self.stns = results[0]
         self.file_name = results[1]
         self.file_date = results[2]
         self.metadata = results[3]
@@ -156,7 +163,7 @@ def read_coord_elements(line, coord_types, desc_index):
 # Example of usage
 # ----------------------------------------------------------------------
 
-xyz_file = '300236_GDA2020-MC.simult.xyz'
+xyz_file = ''
 
 if xyz_file:
     xyz_results = DynaXYZ(xyz_file)
@@ -173,30 +180,50 @@ if xyz_file:
 
     # print results
     out_str += '\nStations:\n'
-    out_str += '-' * 178 + '\n'
-    for stn in xyz_results.stations:
+    out_str += '{:20s} {:>3s} {:>14s} {:>14s} {:>10s} {:>10s} {:>8s} {:>8s} {:>8s} ' \
+               '{:>14s} {:>14s} {:>5s} {:>14s} {:>14s} {:>14s}\n'.format(
+        'Station',
+        'F/C',
+        'Latitude DD',
+        'Longitude DD',
+        'Ell_Ht',
+        'Phys_Ht',
+        'SD_E',
+        'SD_N',
+        'SD_U',
+        'Easting',
+        'Northing',
+        'Zone',
+        'X',
+        'Y',
+        'Z',
+    )
+    out_str += '-' * 184 + '\n'
+
+    for stn in xyz_results.stns:
         out_str += '{:20s} {:3s} {:14.8f} {:14.8f} {:10.4f} {:10.4f} {:8.4f} {:8.4f} {:8.4f} '.format(
-            xyz_results.stations[stn].name,
-            xyz_results.stations[stn].con,
-            xyz_results.stations[stn].lat.dec(),
-            xyz_results.stations[stn].lon.dec(),
-            xyz_results.stations[stn].ehgt,
-            xyz_results.stations[stn].ohgt,
-            xyz_results.stations[stn].sd_e,
-            xyz_results.stations[stn].sd_n,
-            xyz_results.stations[stn].sd_u
+            xyz_results.stns[stn].name,
+            xyz_results.stns[stn].con,
+            xyz_results.stns[stn].lat.dec(),
+            xyz_results.stns[stn].lon.dec(),
+            xyz_results.stns[stn].ehgt,
+            xyz_results.stns[stn].ohgt,
+            xyz_results.stns[stn].sd_e,
+            xyz_results.stns[stn].sd_n,
+            xyz_results.stns[stn].sd_u
         )
 
-        grid = xyz_results.stations[stn].grid()
-        xyz = xyz_results.stations[stn].xyz()
+        grid = xyz_results.stns[stn].grid()
+        xyz = xyz_results.stns[stn].xyz()
 
-        out_str += '{:14.4f} {:14.4f} {:14.4f} {:14.4f} {:14.4f}\n'.format(
+        out_str += '{:14.4f} {:14.4f} {:5d} {:14.4f} {:14.4f} {:14.4f}\n'.format(
             grid[2],
             grid[3],
+            grid[1],
             xyz[0],
             xyz[1],
             xyz[2]
         )
 
-    with open('scratch.txt', 'w') as scratch_fh:
-        scratch_fh.write(out_str)
+    with open('pynadjust_xyz.txt', 'w') as fh:
+        fh.write(out_str)
