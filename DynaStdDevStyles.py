@@ -152,7 +152,11 @@ with open(sd_xml, 'w') as f_out:
                 orig_vcv[1,1] = float(m['GPSBaseline']['SigmaYY'])
                 orig_vcv[1,2] = float(m['GPSBaseline']['SigmaYZ'])
                 orig_vcv[2,2] = float(m['GPSBaseline']['SigmaZZ'])
-                orig_vcv = orig_vcv * float(m['Vscale'])
+                orig_vcv  = orig_vcv * float(m['Vscale'])
+                orig_enu  = vcv_cart2local(orig_vcv, at_lat, at_lng)
+                orig_enu[0,0] = orig_enu[0,0] * float(m['Pscale'])
+                orig_enu[1,1] = orig_enu[1,1] * float(m['Lscale'])
+                orig_enu[2,2] = orig_enu[2,2] * float(m['Hscale'])
                 
                 # find and apply the centring error styling of the at and to station
                 # transform these from enu to xyz
@@ -184,7 +188,6 @@ with open(sd_xml, 'w') as f_out:
                 cal_enu = enu + at_sd + to_sd
                 
                 if 'IncreaseReduce' in s:
-                    orig_enu  = vcv_cart2local(orig_vcv, at_lat, at_lng)
                     if (s['IncreaseOrReduce'] == 'Reduce'
                         and cal_enu[0,0] > orig_enu[0,0] 
                         and cal_enu[1,1] > orig_enu[1,1] 
@@ -196,32 +199,33 @@ with open(sd_xml, 'w') as f_out:
                         and cal_enu[2,2] < orig_enu[2,2]):
                             cal_enu = orig_enu
                 
-                #transform and apply to output file
-                vcv = vcv_local2cart(cal_enu, at_lat, at_lng)
-                new_vcv = (
-                    '\t\t<Vscale>1.000</Vscale>\n' +
-                    '\t\t<Pscale>1.000</Pscale>\n' +
-                    '\t\t<Lscale>1.000</Lscale>\n' +
-                    '\t\t<Hscale>1.000</Hscale>\n' +
-                    '\t\t<GPSBaseline>\n' +
-                    '\t\t\t<X>'  + m['GPSBaseline']['X'] + '</X>\n' +
-                    '\t\t\t<Y>'  + m['GPSBaseline']['Y'] + '</Y>\n' +
-                    '\t\t\t<Z>'  + m['GPSBaseline']['Z'] + '</Z>\n' +
-                    '\t\t\t<SigmaXX>'+ str(vcv[0,0]) + '</SigmaXX>\n' +
-                    '\t\t\t<SigmaXY>'+ str(vcv[0,1]) + '</SigmaXY>\n' +
-                    '\t\t\t<SigmaXZ>'+ str(vcv[0,2]) + '</SigmaXZ>\n' +
-                    '\t\t\t<SigmaYY>'+ str(vcv[1,1]) + '</SigmaYY>\n' +
-                    '\t\t\t<SigmaYZ>'+ str(vcv[1,2]) + '</SigmaYZ>\n' +
-                    '\t\t\t<SigmaZZ>'+ str(vcv[2,2]) + '</SigmaZZ>\n' +
-                    '\t\t</GPSBaseline>'
-                        )
-
-                msr_out = (msr_out.replace('<Vscale>','<!--Vscale>')
-                            .replace('</Hscale>','</Hscale-->')
-                            .replace('<GPSBaseline>',
-                            '<!--GPSBaseline> Rescaled with Std Dev Styles')
-                            .replace('</GPSBaseline>',
-                                     '</GPSBaseline-->\n' + new_vcv))
+                if cal_enu != orig_enu:                	
+	                #transform and apply to output file
+	                vcv = vcv_local2cart(cal_enu, at_lat, at_lng)
+	                new_vcv = (
+	                    '\t\t<Vscale>1.000</Vscale>\n' +
+	                    '\t\t<Pscale>1.000</Pscale>\n' +
+	                    '\t\t<Lscale>1.000</Lscale>\n' +
+	                    '\t\t<Hscale>1.000</Hscale>\n' +
+	                    '\t\t<GPSBaseline>\n' +
+	                    '\t\t\t<X>'  + m['GPSBaseline']['X'] + '</X>\n' +
+	                    '\t\t\t<Y>'  + m['GPSBaseline']['Y'] + '</Y>\n' +
+	                    '\t\t\t<Z>'  + m['GPSBaseline']['Z'] + '</Z>\n' +
+	                    '\t\t\t<SigmaXX>'+ str(vcv[0,0]) + '</SigmaXX>\n' +
+	                    '\t\t\t<SigmaXY>'+ str(vcv[0,1]) + '</SigmaXY>\n' +
+	                    '\t\t\t<SigmaXZ>'+ str(vcv[0,2]) + '</SigmaXZ>\n' +
+	                    '\t\t\t<SigmaYY>'+ str(vcv[1,1]) + '</SigmaYY>\n' +
+	                    '\t\t\t<SigmaYZ>'+ str(vcv[1,2]) + '</SigmaYZ>\n' +
+	                    '\t\t\t<SigmaZZ>'+ str(vcv[2,2]) + '</SigmaZZ>\n' +
+	                    '\t\t</GPSBaseline>'
+	                        )
+	
+	                msr_out = (msr_out.replace('<Vscale>','<!--Vscale>')
+	                            .replace('</Hscale>','</Hscale-->')
+	                            .replace('<GPSBaseline>',
+	                            '<!--GPSBaseline> Rescaled with Std Dev Styles')
+	                            .replace('</GPSBaseline>',
+	                                     '</GPSBaseline-->\n' + new_vcv))
 
         f_out.write(msr_out)
         i+=1  
