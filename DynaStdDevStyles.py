@@ -121,14 +121,14 @@ i=0
 # Run through the msr file and reprint Std Dev Styled Baselines
 with open(sd_xml, 'w') as f_out:
     while i != len(xml_s):
-        msr_out = xml_s[i] +'\n'
+        msr_out = xml_s[i]
         # Stripout the observations or print the line.
         if xml_s[i].find('<DnaMeasurement>')!=-1:
             msr_out=''
             while xml_s[i].find('</DnaMeasurement>')==-1:
                 msr_out = msr_out + xml_s[i] +'\n'
                 i+=1
-            msr_out = msr_out + xml_s[i] +'\n'
+            msr_out = msr_out + xml_s[i]
             
             # Test if the measurement needs changing
             m = xmltodict.parse(msr_out
@@ -156,27 +156,25 @@ with open(sd_xml, 'w') as f_out:
                 orig_vcv[1,1] = float(m['GPSBaseline']['SigmaYY'])
                 orig_vcv[1,2] = float(m['GPSBaseline']['SigmaYZ'])
                 orig_vcv[2,2] = float(m['GPSBaseline']['SigmaZZ'])
-                orig_vcv  = orig_vcv * float(m['Vscale'])
                 orig_enu  = vcv_cart2local(orig_vcv, at_lat, at_lng)
-                orig_enu[0,0] = orig_enu[0,0] * float(m['Pscale'])
-                orig_enu[1,1] = orig_enu[1,1] * float(m['Lscale'])
-                orig_enu[2,2] = orig_enu[2,2] * float(m['Hscale'])
                 
                 # find and apply the centring error styling of the at and to station
                 # transform these from enu to xyz
                 if 'FirstStdDevSetupStyle' in m:
                     c = sd_styl[m['FirstStdDevSetupStyle']]['CentringStdDev']
                     v = sd_styl[m['FirstStdDevSetupStyle']]['VtStdDev']
-                    at_sd[0,0] = float(c)**2
-                    at_sd[1,1] = float(c)**2
-                    at_sd[2,2] = float(v)**2
+                    at_sd[0,0] = float(c)**2 / float(m['Pscale'])
+                    at_sd[1,1] = float(c)**2 / float(m['Lscale'])
+                    at_sd[2,2] = float(v)**2 / float(m['Hscale'])
+                    at_sd = at_sd / float(m['Vscale'])
 
                 if 'SecondStdDevSetupStyle' in m:
                     c = sd_styl[m['SecondStdDevSetupStyle']]['CentringStdDev']
                     v = sd_styl[m['SecondStdDevSetupStyle']]['VtStdDev']
-                    to_sd[0,0] = float(c)**2
-                    to_sd[1,1] = float(c)**2
-                    to_sd[2,2] = float(v)**2
+                    to_sd[0,0] = float(c)**2 / float(m['Pscale'])
+                    to_sd[1,1] = float(c)**2 / float(m['Lscale'])
+                    to_sd[2,2] = float(v)**2 / float(m['Hscale'])
+                    to_sd = to_sd / float(m['Vscale'])
 
                 # Sum the 3 matricies and test against orig               
                 cal_enu = orig_enu + at_sd + to_sd
@@ -190,6 +188,10 @@ with open(sd_xml, 'w') as f_out:
                     enu[0,0]=(float(s['HzConstant'])+dis[0]*float(s['HzPPM'])*10E-6)**2
                     enu[1,1]=(float(s['HzConstant'])+dis[0]*float(s['HzPPM'])*10E-6)**2
                     enu[2,2]=(float(s['VtConstant'])+dis[0]*float(s['VtPPM'])*10E-6)**2
+                    enu  = enu / float(m['Vscale'])
+                    enu[0,0] = enu[0,0] / float(m['Pscale'])
+                    enu[1,1] = enu[1,1] / float(m['Lscale'])
+                    enu[2,2] = enu[2,2] / float(m['Hscale'])
 
                     if 'IncreaseReduce' in s:
                         if (s['IncreaseOrReduce'] == 'Increase'
@@ -202,37 +204,30 @@ with open(sd_xml, 'w') as f_out:
                             and enu[1,1] < orig_enu[1,1] 
                             and enu[2,2] < orig_enu[2,2]):
                                 cal_enu = enu + at_sd + to_sd
-                
-                if orig_enu[0,0] > 0.005:
-                	cal_enu = orig_enu
-                
+
                 if cal_enu.any != orig_enu.any:
 	                #transform and apply to output file
 	                vcv = vcv_local2cart(cal_enu, at_lat, at_lng)
 	                new_vcv = (
-	                    '\t\t<Vscale>1.000</Vscale>\n' +
-	                    '\t\t<Pscale>1.000</Pscale>\n' +
-	                    '\t\t<Lscale>1.000</Lscale>\n' +
-	                    '\t\t<Hscale>1.000</Hscale>\n' +
-	                    '\t\t<GPSBaseline>\n' +
-	                    '\t\t\t<X>'  + m['GPSBaseline']['X'] + '</X>\n' +
-	                    '\t\t\t<Y>'  + m['GPSBaseline']['Y'] + '</Y>\n' +
-	                    '\t\t\t<Z>'  + m['GPSBaseline']['Z'] + '</Z>\n' +
 	                    '\t\t\t<SigmaXX>'+ str(vcv[0,0]) + '</SigmaXX>\n' +
 	                    '\t\t\t<SigmaXY>'+ str(vcv[0,1]) + '</SigmaXY>\n' +
 	                    '\t\t\t<SigmaXZ>'+ str(vcv[0,2]) + '</SigmaXZ>\n' +
 	                    '\t\t\t<SigmaYY>'+ str(vcv[1,1]) + '</SigmaYY>\n' +
 	                    '\t\t\t<SigmaYZ>'+ str(vcv[1,2]) + '</SigmaYZ>\n' +
-	                    '\t\t\t<SigmaZZ>'+ str(vcv[2,2]) + '</SigmaZZ>\n' +
-	                    '\t\t</GPSBaseline>'
+	                    '\t\t\t<SigmaZZ>'+ str(vcv[2,2]) + '</SigmaZZ>\n'
 	                        )
 	
-	                msr_out = (msr_out.replace('<Vscale>','<!--Vscale>')
-	                            .replace('</Hscale>','</Hscale-->')
-	                            .replace('<GPSBaseline>',
-	                            '<!--GPSBaseline> Rescaled with Std Dev Styles')
-	                            .replace('</GPSBaseline>',
-	                                     '</GPSBaseline-->\n' + new_vcv))
+	                msr_out = (msr_out
+                            .replace('<Sigma','<!--Sigma')
+                            .replace('</SigmaXX>','</SigmaXX-->')
+                            .replace('</SigmaXY>','</SigmaXY-->')
+                            .replace('</SigmaXZ>','</SigmaXZ-->')
+                            .replace('</SigmaYY>','</SigmaYY-->')
+                            .replace('</SigmaYZ>','</SigmaYZ-->')
+                            .replace('</SigmaZZ>','</SigmaZZ-->')
+                            .replace('</GPSBaseline>',
+                                 '<!-- VCV Rescaled with Std Dev Styles-->\n'
+                                 + new_vcv + '\t\t</GPSBaseline>' ))
 
-        f_out.write(msr_out)
+        f_out.write(msr_out+'\n')
         i+=1  
