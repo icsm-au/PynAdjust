@@ -60,7 +60,7 @@ import numpy as np
 #'''''''''''''''''''''''''''''''''''''''''''''''
 #'''' Assign file Names and Check for errors '''
 #'''''''''''''''''''''''''''''''''''''''''''''''
-msr_xml='BYUP1.msr.xml'
+msr_xml='94G14692.msr.xml'
 if len(sys.argv)>1:msr_xml=sys.argv[1]
 sd_xml=msr_xml.replace('msr.','sd_msr.')
 stn_xml=msr_xml.replace('msr.','stn.')
@@ -82,7 +82,7 @@ for s in xml_s:
             'P':s['StationCoord']['YAxis']}
 
 
-# Put the StdDev Styles into into a dictionaries
+# Put the StdDev Styles into into dictionaries
 with open(msr_xml, 'r') as x:
     xml_s = (x.read()
         .replace('<!--StdDev','<StdDev')
@@ -91,23 +91,25 @@ with open(msr_xml, 'r') as x:
         .replace('<!--SecondStdDevSetupStyle','<SecondStdDevSetupStyle'))
 xml_s = xmltodict.parse(xml_s)
 
-x = xml_s['DnaXmlFormat']['StdDevSetupStyle']
-if type(x)!=list: x=[x]
-sd_styl={}
-for s in x:
-    sd_styl[s['StyleName']]={
-            'CentringStdDev':s['CentringStdDev'],
-            'VtStdDev':s['VtStdDev']}
-    
-x = xml_s['DnaXmlFormat']['StdDevObsStyle']
-if type(x)!=list: x=[x]
-obs_styl={}
-for s in x:
-    obs_styl[s['StyleName']]={
-            'HzPPM':s['HzPPM'],
-            'HzConstant':s['HzConstant'],
-            'VtPPM':s['VtPPM'],
-            'VtConstant':s['VtConstant']}
+if 'StdDevSetupStyle' in xml_s['DnaXmlFormat']:
+    x = xml_s['DnaXmlFormat']['StdDevSetupStyle']
+    if type(x)!=list: x=[x]
+    sd_styl={}
+    for s in x:
+        sd_styl[s['StyleName']]={
+                'CentringStdDev':s['CentringStdDev'],
+                'VtStdDev':s['VtStdDev']}
+
+if 'StdDevObsStyle' in xml_s['DnaXmlFormat']:    
+    x = xml_s['DnaXmlFormat']['StdDevObsStyle']
+    if type(x)!=list: x=[x]
+    obs_styl={}
+    for s in x:
+        obs_styl[s['StyleName']]={
+                'HzPPM':s['HzPPM'],
+                'HzConstant':s['HzConstant'],
+                'VtPPM':s['VtPPM'],
+                'VtConstant':s['VtConstant']}
 
 # Put the msr.xml file into a list ... Including comments
 xml_s = xml.dom.minidom.parse(msr_xml)
@@ -133,7 +135,9 @@ with open(sd_xml, 'w') as f_out:
                     .replace('<!--','<')
                     .replace('-->','>'))['DnaMeasurement']
             if (m['Type']=='G' 
-              and ('StdDevSetupStyle' in m or 'StdDevObsStyle' in m)):
+              and ('FirstStdDevSetupStyle' in m 
+                   or 'SecondStdDevSetupStyle' in m
+                   or 'StdDevObsStyle' in m)):
                 #find the coordinates of the at and to station
                 at_lat   = hp2dec(float(stn[m['First']]['L']))
                 at_lng   = hp2dec(float(stn[m['First']]['P']))
@@ -174,6 +178,9 @@ with open(sd_xml, 'w') as f_out:
                     to_sd[1,1] = float(c)**2
                     to_sd[2,2] = float(v)**2
 
+                # Sum the 3 matricies and test against orig               
+                cal_enu = orig_enu + at_sd + to_sd
+                
                 # find and apply any StdDevObsStyle styling templates
                 s=''
                 if 'StdDevObsStyle' in m:
@@ -183,23 +190,20 @@ with open(sd_xml, 'w') as f_out:
                     enu[0,0]=(float(s['HzConstant'])+dis[0]*float(s['HzPPM'])*10E-6)**2
                     enu[1,1]=(float(s['HzConstant'])+dis[0]*float(s['HzPPM'])*10E-6)**2
                     enu[2,2]=(float(s['VtConstant'])+dis[0]*float(s['VtPPM'])*10E-6)**2
-                                        
-                # Sum the 3 matricies and test against orig               
-                cal_enu = enu + at_sd + to_sd
-                
-                if 'IncreaseReduce' in s:
-                    if (s['IncreaseOrReduce'] == 'Reduce'
-                        and cal_enu[0,0] > orig_enu[0,0] 
-                        and cal_enu[1,1] > orig_enu[1,1] 
-                        and cal_enu[2,2] > orig_enu[2,2]):
-                            cal_enu = orig_enu
-                    elif (s['IncreaseOrReduce'] == 'Increase'
-                        and cal_enu[0,0] < orig_enu[0,0] 
-                        and cal_enu[1,1] < orig_enu[1,1] 
-                        and cal_enu[2,2] < orig_enu[2,2]):
-                            cal_enu = orig_enu
-                
-                if cal_enu != orig_enu:                	
+
+                    if 'IncreaseReduce' in s:
+                        if (s['IncreaseOrReduce'] == 'Increase'
+                            and enu[0,0] > orig_enu[0,0] 
+                            and enu[1,1] > orig_enu[1,1] 
+                            and enu[2,2] > orig_enu[2,2]):
+                                cal_enu = enu + at_sd + to_sd
+                        elif (s['IncreaseOrReduce'] == 'Reduce'
+                            and enu[0,0] < orig_enu[0,0] 
+                            and enu[1,1] < orig_enu[1,1] 
+                            and enu[2,2] < orig_enu[2,2]):
+                                cal_enu = enu + at_sd + to_sd
+
+                if cal_enu.any() != orig_enu.any():
 	                #transform and apply to output file
 	                vcv = vcv_local2cart(cal_enu, at_lat, at_lng)
 	                new_vcv = (
