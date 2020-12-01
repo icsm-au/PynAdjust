@@ -202,8 +202,11 @@ with open(sd_xml, 'w') as f_out:
                             and enu[1,1] < orig_enu[1,1] 
                             and enu[2,2] < orig_enu[2,2]):
                                 cal_enu = enu + at_sd + to_sd
-
-                if cal_enu.any() != orig_enu.any():
+                
+                if orig_enu[0,0] > 0.005:
+                	cal_enu = orig_enu
+                
+                if cal_enu.any != orig_enu.any:
 	                #transform and apply to output file
 	                vcv = vcv_local2cart(cal_enu, at_lat, at_lng)
 	                new_vcv = (
