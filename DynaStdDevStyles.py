@@ -84,15 +84,15 @@ for s in xml_s:
 
 # Put the StdDev Styles into into dictionaries
 with open(msr_xml, 'r') as x:
-    xml_s = (x.read()
+    xml_m = (x.read()
         .replace('<!--StdDev','<StdDev')
         .replace('Style-->','Style>')
         .replace('<!--FirstStdDevSetupStyle','<FirstStdDevSetupStyle')
         .replace('<!--SecondStdDevSetupStyle','<SecondStdDevSetupStyle'))
-xml_s = xmltodict.parse(xml_s)
+xml_m = xmltodict.parse(xml_m)
 
-if 'StdDevSetupStyle' in xml_s['DnaXmlFormat']:
-    x = xml_s['DnaXmlFormat']['StdDevSetupStyle']
+if 'StdDevSetupStyle' in xml_m['DnaXmlFormat']:
+    x = xml_m['DnaXmlFormat']['StdDevSetupStyle']
     if type(x)!=list: x=[x]
     sd_styl={}
     for s in x:
@@ -100,8 +100,8 @@ if 'StdDevSetupStyle' in xml_s['DnaXmlFormat']:
                 'CentringStdDev':float(s['CentringStdDev']),
                 'VtStdDev':float(s['VtStdDev'])}
 
-if 'StdDevObsStyle' in xml_s['DnaXmlFormat']:    
-    x = xml_s['DnaXmlFormat']['StdDevObsStyle']
+if 'StdDevObsStyle' in xml_m['DnaXmlFormat']:    
+    x = xml_m['DnaXmlFormat']['StdDevObsStyle']
     if type(x)!=list: x=[x]
     obs_styl={}
     for s in x:
@@ -112,23 +112,23 @@ if 'StdDevObsStyle' in xml_s['DnaXmlFormat']:
                 'VtConstant':float(s['VtConstant'])}
 
 # Put the msr.xml file into a list ... Including comments
-xml_s = xml.dom.minidom.parse(msr_xml)
-xml_s = xml_s.toprettyxml()
-xml_s = [s for s in xml_s.split('\n') if s.strip()!='']
+xml_m = xml.dom.minidom.parse(msr_xml)
+xml_m = xml_m.toprettyxml()
+xml_m = [s for s in xml_m.split('\n') if s.strip()!='']
 
 
 i=0
 # Run through the msr file and reprint Std Dev Styled Baselines
 with open(sd_xml, 'w') as f_out:
-    while i != len(xml_s):
-        msr_out = xml_s[i]
+    while i != len(xml_m):
+        msr_out = xml_m[i]
         # Stripout the observations or print the line.
-        if xml_s[i].find('<DnaMeasurement>')!=-1:
+        if xml_m[i].find('<DnaMeasurement>')!=-1:
             msr_out=''
-            while xml_s[i].find('</DnaMeasurement>')==-1:
-                msr_out = msr_out + xml_s[i] +'\n'
+            while xml_m[i].find('</DnaMeasurement>')==-1:
+                msr_out = msr_out + xml_m[i] +'\n'
                 i+=1
-            msr_out = msr_out + xml_s[i]
+            msr_out = msr_out + xml_m[i]
             
             # Test if the measurement needs changing
             m = xmltodict.parse(msr_out
