@@ -629,28 +629,7 @@ def write_adj_shapefile(adj_object, network_name):
 
         shp_name = network_name + '_' + l
 
-        missing_stnmsrs = set()
         if result:
-
-            for r in result:
-                if r.stn1 not in adj_object.stns:
-                    missing_stnmsrs.add(r.stn1)
-                if r.stn2 not in adj_object.stns:
-                    missing_stnmsrs.add(r.stn2)
-                if r.stn3:
-                    if isinstance(r.stn3, list):
-                        for rl in r.stn3:
-                            if rl not in adj_object.stns:
-                                missing_stnmsrs.add(rl)
-                    elif isinstance(r.stn3, str):
-                        if r.stn3 not in adj_object.stns:
-                            missing_stnmsrs.add(r.stn3)
-
-            if missing_stnmsrs:
-                with open('missing.txt', 'w') as f:
-                    for ms in sorted(missing_stnmsrs):
-                        f.write(f'{ms}\n')
-
 
             # Direction sets
             if l in multi_line_msrs:
