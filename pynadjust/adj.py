@@ -212,6 +212,7 @@ class DynaAdj(object):
                             dir_set += 1
                             d_stn1 = msr_components['stn1']
                             d_stn2 = msr_components['stn2']
+                            d_msr_id = [msr_components['msr_id']]
 
                             msr_object = DynaAdj.Measurement(
                                 msr_type=msr_type,
@@ -231,7 +232,7 @@ class DynaAdj(object):
                                 pelzer=[],
                                 pre_adj_cor=[],
                                 outlier=[],
-                                msr_id=[],
+                                msr_id=d_msr_id,
                                 cluster_id=[]
                             )
 
@@ -630,7 +631,6 @@ def write_adj_shapefile(adj_object, network_name):
         shp_name = network_name + '_' + l
 
         if result:
-
             # Direction sets
             if l in multi_line_msrs:
                 common_fn.write_prj(shp_name, adj_object.metadata.reference_frame)
@@ -658,13 +658,8 @@ def write_adj_shapefile(adj_object, network_name):
                         [adj_object.stns[r.stn2].lon.dec(), adj_object.stns[r.stn2].lat.dec()]],
                     ])
 
-                    if r.msr_id:
-                        chk_msr_id = r.msr_id[0]
-                    else:
-                        chk_msr_id = None
-
                     w.record(r.stn1, r.stn2, 'set zero', None, None, None, None, None, None,
-                             chk_msr_id, r.epoch, r.source)
+                             r.msr_id[0], r.epoch, r.source)
 
                     for s in range(len(r.stn3)):
                         msr = '{:3d} {:2d} {:7.4f}'.format(r.msr[s].degree, r.msr[s].minute, r.msr[s].second)
@@ -675,8 +670,9 @@ def write_adj_shapefile(adj_object, network_name):
                             [adj_object.stns[r.stn3[s]].lon.dec(), adj_object.stns[r.stn3[s]].lat.dec()]],
                         ])
 
+                        # note: msr_ids are indexed 1 after other fields (1st is for ref direction)
                         w.record(r.stn1, r.stn3[s], msr, adj, r.cor[s], r.msr_sd[s], r.adj_sd[s], r.cor_sd[s],
-                                 r.nstat[s], r.msr_id[s], r.epoch, r.source)
+                                 r.nstat[s], r.msr_id[s + 1], r.epoch, r.source)
 
                 w.close()
 
@@ -973,12 +969,22 @@ def read_msr_line(line, tstat_switch, msr_id_switch):
     stn3 = line[42:62].strip()
     if stn3 == '':
         stn3 = None
+
     if msr_type == 'D':
+        if msr_id_switch:
+            items = line.split()
+            cluster_id = items[-1].strip()
+            msr_id = items[-2]
+        else:
+            msr_id = None
+            cluster_id = None
         msr_components = {
             'msr_type': msr_type,
             'stn1': stn1,
             'stn2': stn2,
-            'stn3': stn3
+            'stn3': stn3,
+            'msr_id': msr_id,
+            'cluster_id': cluster_id
         }
 
         return msr_components
