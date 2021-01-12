@@ -212,6 +212,7 @@ class DynaAdj(object):
                             dir_set += 1
                             d_stn1 = msr_components['stn1']
                             d_stn2 = msr_components['stn2']
+                            d_msr_id = [msr_components['msr_id']]
 
                             msr_object = DynaAdj.Measurement(
                                 msr_type=msr_type,
@@ -231,7 +232,7 @@ class DynaAdj(object):
                                 pelzer=[],
                                 pre_adj_cor=[],
                                 outlier=[],
-                                msr_id=[],
+                                msr_id=d_msr_id,
                                 cluster_id=[]
                             )
 
@@ -647,14 +648,18 @@ def write_adj_shapefile(adj_object, network_name):
                 w.field('adj_sd', 'N', decimal=4)
                 w.field('cor_sd', 'N', decimal=4)
                 w.field('nstat', 'N', decimal=4)
+                w.field('msr_id', 'N')
+                w.field('epoch', 'C', size=10)
+                w.field('source', 'C')
 
                 for r in result:
                     w.line([
                         [[adj_object.stns[r.stn1].lon.dec(), adj_object.stns[r.stn1].lat.dec()],
-                         [adj_object.stns[r.stn2].lon.dec(), adj_object.stns[r.stn2].lat.dec()]],
+                        [adj_object.stns[r.stn2].lon.dec(), adj_object.stns[r.stn2].lat.dec()]],
                     ])
 
-                    w.record(r.stn1, r.stn2, 'set zero', None, None, None, None, None, None)
+                    w.record(r.stn1, r.stn2, 'set zero', None, None, None, None, None, None,
+                             r.msr_id[0], r.epoch, r.source)
 
                     for s in range(len(r.stn3)):
                         msr = '{:3d} {:2d} {:7.4f}'.format(r.msr[s].degree, r.msr[s].minute, r.msr[s].second)
@@ -662,10 +667,12 @@ def write_adj_shapefile(adj_object, network_name):
 
                         w.line([
                             [[adj_object.stns[r.stn1].lon.dec(), adj_object.stns[r.stn1].lat.dec()],
-                             [adj_object.stns[r.stn3[s]].lon.dec(), adj_object.stns[r.stn3[s]].lat.dec()]],
+                            [adj_object.stns[r.stn3[s]].lon.dec(), adj_object.stns[r.stn3[s]].lat.dec()]],
                         ])
 
-                        w.record(r.stn1, r.stn3[s], msr, adj, r.cor[s], r.msr_sd[s], r.adj_sd[s], r.cor_sd[s], r.nstat[s])
+                        # note: msr_ids are indexed 1 after other fields (1st is for ref direction)
+                        w.record(r.stn1, r.stn3[s], msr, adj, r.cor[s], r.msr_sd[s], r.adj_sd[s], r.cor_sd[s],
+                                 r.nstat[s], r.msr_id[s + 1], r.epoch, r.source)
 
                 w.close()
 
@@ -691,11 +698,15 @@ def write_adj_shapefile(adj_object, network_name):
                     w.field('adj_sd', 'N', decimal=4)
                     w.field('cor_sd', 'N', decimal=4)
                     w.field('nstat', 'N', decimal=4)
+                    w.field('msr_id', 'N')
+                    w.field('epoch', 'C', size=10)
+                    w.field('source', 'C')
 
                     for r in result:
                         w.point(adj_object.stns[r.stn1].lon.dec(), adj_object.stns[r.stn1].lat.dec())
 
-                        w.record(r.stn1, r.msr, r.adj, r.cor, r.msr_sd, r.adj_sd, r.cor_sd, r.nstat)
+                        w.record(r.stn1, r.msr, r.adj, r.cor, r.msr_sd, r.adj_sd, r.cor_sd, r.nstat,
+                                 r.msr_id, r.epoch, r.source)
 
                 else:
 
@@ -725,6 +736,9 @@ def write_adj_shapefile(adj_object, network_name):
                     w.field('nstat_' + cardinal[2], 'N', decimal=4)
                     w.field('max_cor', 'N', decimal=4)
                     w.field('max_nstat', 'N', decimal=4)
+                    w.field('msr_id', 'N')
+                    w.field('epoch', 'C', size=10)
+                    w.field('source', 'C')
 
                     for r in result:
                         max_nstat = max_stat(r.nstat)
@@ -740,7 +754,8 @@ def write_adj_shapefile(adj_object, network_name):
                                  r.adj_sd[0], r.adj_sd[1], r.adj_sd[2],
                                  r.cor_sd[0], r.cor_sd[1], r.cor_sd[2],
                                  r.nstat[0], r.nstat[1], r.nstat[2],
-                                 max_cor, max_nstat
+                                 max_cor, max_nstat,
+                                 r.msr_id, r.epoch, r.source
                                  )
 
                 w.close()
@@ -766,6 +781,9 @@ def write_adj_shapefile(adj_object, network_name):
                         w.field('adj_sd', 'N', decimal=4)
                         w.field('cor_sd', 'N', decimal=4)
                         w.field('nstat', 'N', decimal=4)
+                        w.field('msr_id', 'N')
+                        w.field('epoch', 'C', size=10)
+                        w.field('source', 'C')
 
                         for r in result:
                             w.line([
@@ -776,7 +794,8 @@ def write_adj_shapefile(adj_object, network_name):
                             msr = '{:3d} {:2d} {:7.4f}'.format(r.msr.degree, r.msr.minute, r.msr.second)
                             adj = '{:3d} {:2d} {:7.4f}'.format(r.adj.degree, r.adj.minute, r.adj.second)
 
-                            w.record(r.stn1, r.stn2, msr, adj, r.cor, r.msr_sd, r.adj_sd, r.cor_sd, r.nstat)
+                            w.record(r.stn1, r.stn2, msr, adj, r.cor, r.msr_sd, r.adj_sd, r.cor_sd, r.nstat,
+                                     r.msr_id, r.epoch, r.source)
 
                     else:
 
@@ -789,6 +808,9 @@ def write_adj_shapefile(adj_object, network_name):
                         w.field('adj_sd', 'N', decimal=4)
                         w.field('cor_sd', 'N', decimal=4)
                         w.field('nstat', 'N', decimal=4)
+                        w.field('msr_id', 'N')
+                        w.field('epoch', 'C', size=10)
+                        w.field('source', 'C')
 
                         for r in result:
                             w.line([
@@ -796,7 +818,8 @@ def write_adj_shapefile(adj_object, network_name):
                                  [adj_object.stns[r.stn2].lon.dec(), adj_object.stns[r.stn2].lat.dec()]],
                             ])
 
-                            w.record(r.stn1, r.stn2, r.msr, r.adj, r.cor, r.msr_sd, r.adj_sd, r.cor_sd, r.nstat)
+                            w.record(r.stn1, r.stn2, r.msr, r.adj, r.cor, r.msr_sd, r.adj_sd, r.cor_sd, r.nstat,
+                                     r.msr_id, r.epoch, r.source)
 
                 # G/X
                 else:
@@ -827,6 +850,9 @@ def write_adj_shapefile(adj_object, network_name):
                     w.field('nstat_' + cardinal[2], 'N', decimal=4)
                     w.field('max_cor', 'N', decimal=4)
                     w.field('max_nstat', 'N', decimal=4)
+                    w.field('msr_id', 'N')
+                    w.field('epoch', 'C', size=10)
+                    w.field('source', 'C')
 
                     for r in result:
                         max_nstat = max_stat(r.nstat)
@@ -845,7 +871,8 @@ def write_adj_shapefile(adj_object, network_name):
                                  r.adj_sd[0], r.adj_sd[1], r.adj_sd[2],
                                  r.cor_sd[0], r.cor_sd[1], r.cor_sd[2],
                                  r.nstat[0], r.nstat[1], r.nstat[2],
-                                 max_cor, max_nstat
+                                 max_cor, max_nstat,
+                                 r.msr_id, r.epoch, r.source
                                  )
 
                 w.close()
@@ -868,6 +895,9 @@ def write_adj_shapefile(adj_object, network_name):
                 w.field('adj_sd', 'N', decimal=4)
                 w.field('cor_sd', 'N', decimal=4)
                 w.field('nstat', 'N', decimal=4)
+                w.field('msr_id', 'N')
+                w.field('epoch', 'C', size=10)
+                w.field('source', 'C')
 
                 for r in result:
                     msr = '{:3d} {:2d} {:7.4f}'.format(r.msr.degree, r.msr.minute, r.msr.second)
@@ -883,6 +913,8 @@ def write_adj_shapefile(adj_object, network_name):
                     w.record(r.stn1, r.stn2, r.stn3, r.msr, r.adj, r.cor, r.msr_sd, r.adj_sd, r.cor_sd, r.nstat)
 
                 w.close()
+
+        
     # return to parent directory
     os.chdir('..')
 
@@ -937,12 +969,22 @@ def read_msr_line(line, tstat_switch, msr_id_switch):
     stn3 = line[42:62].strip()
     if stn3 == '':
         stn3 = None
+
     if msr_type == 'D':
+        if msr_id_switch:
+            items = line.split()
+            cluster_id = items[-1].strip()
+            msr_id = items[-2]
+        else:
+            msr_id = None
+            cluster_id = None
         msr_components = {
             'msr_type': msr_type,
             'stn1': stn1,
             'stn2': stn2,
-            'stn3': stn3
+            'stn3': stn3,
+            'msr_id': msr_id,
+            'cluster_id': cluster_id
         }
 
         return msr_components
