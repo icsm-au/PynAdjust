@@ -2,6 +2,7 @@
 
 import datetime
 import geodepy.convert as gc
+import geodepy.geodesy as gg
 import geodepy.statistics as gstat
 import shapefile
 import numpy as np
@@ -92,18 +93,30 @@ class RelativeUncertainty(object):
         self.covariance = covariance
 
 
+class CoordDiff():
+    def __init__(self, name=None, d_east=None, d_north=None, d_zone=None, d_ehgt=None, d_ohgt=None,
+                 brg=None, dist=None):
+        self.name = name
+        self.d_east = d_east
+        self.d_north = d_north
+        self.d_zone = d_zone
+        self.d_ehgt = d_ehgt
+        self.d_ohgt = d_ohgt
+        self.brg = brg
+        self.dist = dist
+
+
 class DynaResults(object):
-    def __init__(self, adj_file=None, xyz_file=None, apu_file=None, stns={}, msrs=[], adj_metadata=AdjMetadata(),
-                 file_metadata=FileMetadata(), adj_stats=AdjStats(), relative_uncertainties=[]):
+    def __init__(self, adj_file=None, xyz_file=None, apu_file=None, stns=None, msrs=None):
         self.adj_file = adj_file
         self.apu_file = apu_file
         self.xyz_file = xyz_file
-        self.stns = stns
-        self.msrs = msrs
-        self.adj_metadata = adj_metadata
-        self.file_metadata = file_metadata
-        self.adj_stats = adj_stats
-        self.relative_uncertainties = relative_uncertainties
+        self.stns = stns if stns != None else {}
+        self.msrs = msrs if msrs != None else []
+        self.adj_metadata = AdjMetadata()
+        self.file_metadata = FileMetadata()
+        self.adj_stats = AdjStats()
+        self.relative_uncertainties = []
 
         # consume files at initialisation
         self.read_results()
@@ -299,7 +312,7 @@ class DynaResults(object):
 
         # check covariances present
         if not self.adj_metadata.full_covariance_matrix:
-            warnings.warn(f'Covariances not present; all RU is uncorrelated')
+            warnings.warn('Covariances not present; all RU is uncorrelated')
 
         # create a list of stn pairs to compute RU
         ru_list = []
@@ -595,7 +608,7 @@ def read_coord_elements(line, coord_types, desc_index):
     return stn_object
 
 
-def read_xyz_file(xyz_file, stns={}, adj_metadata=AdjMetadata(), file_metadata=FileMetadata()):
+def read_xyz_file(xyz_file, stns=None, adj_metadata=None, file_metadata=None):
     """
     function to read metadata and coordinate information from a DynAdjust station file.
     Can be called standalone or as a DynaResults object method.
@@ -605,6 +618,10 @@ def read_xyz_file(xyz_file, stns={}, adj_metadata=AdjMetadata(), file_metadata=F
     :param file_metadata: Defaults to new FileMetadata object
     :return: dictionary of Station objects, AdjMetadata and FileMetada objects
     """
+    # initialise kwargs unless args supplied
+    stns = stns if stns != None else {}
+    adj_metadata = adj_metadata if adj_metadata != None else AdjMetadata()
+    file_metadata = file_metadata if file_metadata != None else FileMetadata()
 
     with open(xyz_file, 'r') as f:
         switches = Switches(header=True)
@@ -649,8 +666,7 @@ def read_xyz_file(xyz_file, stns={}, adj_metadata=AdjMetadata(), file_metadata=F
     return stns, adj_metadata, file_metadata
 
 
-def read_adj_file(adj_file, stns={}, msrs=[], adj_metadata=AdjMetadata(), file_metadata=FileMetadata(),
-                  adj_stats=AdjStats()):
+def read_adj_file(adj_file, stns=None, msrs=None, adj_metadata=None, file_metadata=None, adj_stats=None):
     """
     Function to read all metadata, measurement and coordinate information from an adj file.
     can be called as a standalone function or a DynaResults method
@@ -663,6 +679,12 @@ def read_adj_file(adj_file, stns={}, msrs=[], adj_metadata=AdjMetadata(), file_m
     :return: tuple of (Dictionary of Station objects, list of Measurement objects, AdjMetadata object, FileMetadata object,
              AdjStats object)
     """
+    # initialise kwargs unless args supplied
+    stns = stns if stns != None else {}
+    msrs = msrs if msrs != None else []
+    adj_metadata = adj_metadata if adj_metadata != None else AdjMetadata()
+    file_metadata = file_metadata if file_metadata != None else FileMetadata()
+    adj_stats = adj_stats if adj_stats != None else AdjStats()
 
     with open(adj_file, 'r') as f:
         switches = Switches(header=True)
@@ -692,7 +714,6 @@ def read_adj_file(adj_file, stns={}, msrs=[], adj_metadata=AdjMetadata(), file_m
             if not stns:
                 if 'Adjusted Coordinates' in line:
                     stn_line = line_count + 5
-                    print('skipped stn read')
 
                 if stn_line:
                     if line_count == stn_line - 2:
@@ -898,7 +919,7 @@ def read_adj_file(adj_file, stns={}, msrs=[], adj_metadata=AdjMetadata(), file_m
     return stns, msrs, adj_stats, adj_metadata, file_metadata
 
 
-def read_apu_file(apu_file, stns={}, adj_metadata=AdjMetadata(), file_metadata=FileMetadata(), adj_stats=AdjStats()):
+def read_apu_file(apu_file, stns=None, adj_metadata=None, file_metadata=None, adj_stats=None):
     """
     Function to consume DynAdjust *.apu file
     note: Variance matrix components are stored in XYZ rotation ONLY.
@@ -911,6 +932,11 @@ def read_apu_file(apu_file, stns={}, adj_metadata=AdjMetadata(), file_metadata=F
     :param adj_stats: defaults to new AdjStats object
     :return: Updated dictionary of stations, AdjMetadata, FileMetadata and AdjStats objects
     """
+    # initialise kwargs unless args supplied
+    stns = stns if stns != None else {}
+    adj_metadata = adj_metadata if adj_metadata != None else AdjMetadata()
+    file_metadata = file_metadata if file_metadata != None else FileMetadata()
+    adj_stats = adj_stats if adj_stats != None else AdjStats()
 
     with open(apu_file) as f:
         switches = Switches(header=True)
@@ -974,12 +1000,8 @@ def read_apu_file(apu_file, stns={}, adj_metadata=AdjMetadata(), file_metadata=F
 
                 # Station variance line 2
                 elif num_cols == 2:
-                    try:
-                        vcv_22 = float(line[131:150].strip())
-                        vcv_23 = float(line[150:].strip())
-                    except ValueError:
-                        print(line)
-                        exit()
+                    vcv_22 = float(line[131:150].strip())
+                    vcv_23 = float(line[150:].strip())
                     continue
 
                 #  Station variance line 3
@@ -1381,9 +1403,6 @@ def write_msr_shapefile(stns, msrs, network_name, ref_frame):
 
                 w.close()
 
-    # return to parent directory
-    os.chdir('..')
-
 
 def str_to_dms_angle(angle):
     """
@@ -1639,7 +1658,7 @@ def write_stn_shapefile(stns, network_name, ref_frame=None):
 
 def check_enter_dir(dir_name):
     """
-    Function to check for the existence of a
+    Function to check for a directory's existence before creating it (if necessary) and entering it.
     :param dir_name:
     :return:
     """
@@ -1649,6 +1668,33 @@ def check_enter_dir(dir_name):
         os.mkdir(dir_name)
         os.chdir(dir_name)
 
+
+def compute_coord_diffs(stn1, stn2):
+    """
+    Function to compute coordinate differences between to Station objects.
+    :param stn1: 1st Station object
+    :param stn2: 2nd Station object
+    :return: CoordDiff object
+    """
+    hemi1, zone1, east1, north1, *others = stn1.grid()
+    hemi2, zone2, east2, north2, *others = stn2.grid()
+    d_e = east2 - east1
+    d_n = north2 - north1
+    d_z = zone2 - zone1
+    dist, az12, az21 = gg.vincinv(stn1.lat.dec(), stn1.lon.dec(), stn2.lat.dec(), stn2.lon.dec())
+    d_ohgt = stn2.ohgt - stn1.ohgt
+    d_ehgt = stn2.ehgt - stn1.ehgt
+
+    return CoordDiff(
+        name=stn1.name,
+        d_east=d_e,
+        d_north=d_n,
+        d_zone=d_z,
+        dist=dist,
+        brg=az12,
+        d_ehgt=d_ehgt,
+        d_ohgt=d_ohgt
+    )
 
 # ----------------------------------------------------------------------
 # Example use
@@ -1713,6 +1759,7 @@ if adj_file or apu_file or xyz_file:
             header_str += '-' * 109 + '\n'
             f.write(header_str)
 
+            cov_str = 'No'
             for ru in dyna_res.relative_uncertainties:
                 if ru.covariance:
                     cov_str = 'Yes' if ru.covariance else 'No'
