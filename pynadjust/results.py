@@ -3,6 +3,7 @@
 import datetime
 import geodepy.convert as gc
 import geodepy.geodesy as gg
+import geodepy.ntv2reader as gntv2
 import geodepy.statistics as gstat
 import shapefile
 import numpy as np
@@ -117,6 +118,8 @@ class DynaResults(object):
         self.file_metadata = FileMetadata()
         self.adj_stats = AdjStats()
         self.relative_uncertainties = []
+        self.msr_counts = MsrCounts()
+        self.stn_msr_counts = {}
 
         # consume files at initialisation
         self.read_results()
@@ -146,6 +149,9 @@ class DynaResults(object):
                 file_metadata=self.file_metadata,
                 adj_stats=self.adj_stats
             )
+
+            # tally total adj measurements
+            self.count_adj_msrs()
 
         if self.apu_file:
             read_apu_file(
@@ -435,6 +441,126 @@ class DynaResults(object):
             self.stns[stn].smin = smin
             self.stns[stn].brg = brg
 
+    def count_adj_msrs(self):
+        """
+        Method to count msr types across the whole adjustment
+        :return:
+        """
+        for t in msr_types:
+            msr_group = [m for m in self.msrs if m.msr_type == t]
+
+            if t == 'A':
+                self.msr_counts.a += len(msr_group)
+            elif t == 'B':
+                self.msr_counts.b += len(msr_group)
+            elif t == 'C':
+                self.msr_counts.c += len(msr_group)
+            elif t == 'D':
+                for d in msr_group:
+                    self.msr_counts.d += len(d.stn3)
+            elif t == 'E':
+                self.msr_counts.e += len(msr_group)
+            elif t == 'G':
+                self.msr_counts.g += len(msr_group) * 3
+            elif t == 'H':
+                self.msr_counts.h += len(msr_group)
+            elif t == 'I':
+                self.msr_counts.i += len(msr_group)
+            elif t == 'J':
+                self.msr_counts.j += len(msr_group)
+            elif t == 'K':
+                self.msr_counts.k += len(msr_group)
+            elif t == 'L':
+                self.msr_counts.l += len(msr_group)
+            elif t == 'M':
+                self.msr_counts.m += len(msr_group)
+            elif t == 'P':
+                self.msr_counts.p += len(msr_group)
+            elif t == 'Q':
+                self.msr_counts.q += len(msr_group)
+            elif t == 'R':
+                self.msr_counts.r += len(msr_group)
+            elif t == 'S':
+                self.msr_counts.s += len(msr_group)
+            elif t == 'V':
+                self.msr_counts.v += len(msr_group)
+            elif t == 'X':
+                self.msr_counts.x += len(msr_group) * 3
+            elif t == 'Y':
+                self.msr_counts.z += len(msr_group) * 3
+
+        # sum total
+        self.msr_counts.sum_msr_counts()
+
+    def count_msrs_at_stns(self):
+        """
+        Function to tally measurement counts at each station
+        :return:
+        """
+        # initialise MsrCount classes for each station
+        for stn in self.stns.values():
+            self.stn_msr_counts[stn.name] = MsrCounts()
+
+        # loop through adjusted msrs and increment counters
+        for m in self.msrs:
+            if m.msr_type == 'A':
+                self.stn_msr_counts[m.stn1].a += 1
+                self.stn_msr_counts[m.stn2].a += 1
+                self.stn_msr_counts[m.stn3].a += 1
+            elif m.msr_type == 'B':
+                self.stn_msr_counts[m.stn1].b += 1
+                self.stn_msr_counts[m.stn2].b += 1
+            elif m.msr_type == 'C':
+                self.stn_msr_counts[m.stn1].c += 1
+                self.stn_msr_counts[m.stn2].c += 1
+            elif m.msr_type == 'D':
+                self.stn_msr_counts[m.stn1].d += 1
+                self.stn_msr_counts[m.stn2].d += 1
+                for target in m.stn3:
+                    self.stn_msr_counts[target].d += 1
+            elif m.msr_type == 'E':
+                self.stn_msr_counts[m.stn1].e += 1
+                self.stn_msr_counts[m.stn2].e += 1
+            elif m.msr_type == 'G':
+                self.stn_msr_counts[m.stn1].g += 1
+                self.stn_msr_counts[m.stn2].g += 1
+            elif m.msr_type == 'H':
+                self.stn_msr_counts[m.stn1].h += 1
+            elif m.msr_type == 'I':
+                self.stn_msr_counts[m.stn1].i += 1
+            elif m.msr_type == 'J':
+                self.stn_msr_counts[m.stn1].j += 1
+            elif m.msr_type == 'K':
+                self.stn_msr_counts[m.stn1].k += 1
+                self.stn_msr_counts[m.stn2].k += 1
+            elif m.msr_type == 'L':
+                self.stn_msr_counts[m.stn1].l += 1
+                self.stn_msr_counts[m.stn2].l += 1
+            elif m.msr_type == 'M':
+                self.stn_msr_counts[m.stn1].m += 1
+                self.stn_msr_counts[m.stn2].m += 1
+            elif m.msr_type == 'P':
+                self.stn_msr_counts[m.stn1].p += 1
+            elif m.msr_type == 'Q':
+                self.stn_msr_counts[m.stn1].q += 1
+            elif m.msr_type == 'R':
+                self.stn_msr_counts[m.stn1].r += 1
+            elif m.msr_type == 'S':
+                self.stn_msr_counts[m.stn1].s += 1
+                self.stn_msr_counts[m.stn2].s += 1
+            elif m.msr_type == 'V':
+                self.stn_msr_counts[m.stn1].v += 1
+                self.stn_msr_counts[m.stn2].v += 1
+            elif m.msr_type == 'X':
+                self.stn_msr_counts[m.stn1].x += 1
+                self.stn_msr_counts[m.stn2].x += 1
+            elif m.msr_type == 'Y':
+                self.stn_msr_counts[m.stn1].y += 1
+
+        # sum total at each station
+        for stn in self.stn_msr_counts.values():
+            stn.sum_msr_counts()
+
 
 class Measurement(object):
     def __init__(self, msr_type=None, stn1=None, stn2=None, stn3=None, ignore=None, cardinal=None, msr=None, adj=None,
@@ -515,6 +641,45 @@ class Switches(object):
         self.msrs = False
         self.header = False
         self.stn_msr_count = False
+
+
+class MsrCounts(object):
+    def __init__(self, a=0, b=0, c=0, d=0, e=0, g=0, h=0, i=0, j=0, k=0, l=0, m=0, p=0, q=0, r=0, s=0, v=0, x=0, y=0, z=0):
+        self.a = a
+        self.b = b
+        self.c = c
+        self.d = d
+        self.e = e
+        self.g = g
+        self.h = h
+        self.i = i
+        self.j = j
+        self.k = k
+        self.l = l
+        self.m = m
+        self.p = p
+        self.q = q
+        self.r = r
+        self.s = s
+        self.v = v
+        self.x = x
+        self.y = y
+        self.z = z
+        self.total = None
+
+    def sum_msr_counts(self):
+        """
+        Method to sum individual msr counts and populate the total attribute
+        :return:
+        """
+        msr_sum = 0
+
+        for k, v in vars(self).items():
+            if k != 'total':
+                msr_sum += v
+
+        self.total = msr_sum
+
 
 
 # ----------------------------------------------------------------------
@@ -1695,6 +1860,63 @@ def compute_coord_diffs(stn1, stn2):
         d_ehgt=d_ehgt,
         d_ohgt=d_ohgt
     )
+
+
+def recompute_ohgts(stns, ntv2_file, ntv2_sd_file=None, bicubic_interpolation=True):
+    """
+    Function to recompute physical heights by deriving from ellipsoidal heights via an ntv2 geoid model.
+    Vertical uncertainties will be updated if a geoid_sd file is given.
+    Note: this function should be reviewed once GeodePy Coord classes are implemented in the Station class
+    :param stns: Dictionary of Station objects (e.g., from *.xyz read or DynaResults class)
+    :param ntv2_file: ntv2 file of geoid separations
+    :param ntv2_sd_file: optional ntv2 file of geoid separation standard deviations
+    :param bicubic_interpolation: True/False. False uses bilinear interpolation
+    :return: dictionary of updated stations object with
+    """
+
+    method = 'bicubic' if bicubic_interpolation else 'bilinear'
+    ohgt_stns = {}
+    geoid_grid = gntv2.read_ntv2_file(ntv2_file)
+    if ntv2_sd_file:
+        geoid_sd_grid = gntv2.read_ntv2_file(ntv2_sd_file)
+
+    for stn in stns.values():
+        # interpolate geoid grids
+        n_vals = gntv2.interpolate_ntv2(geoid_grid, stn.lat.dec(), stn.lon.dec(), method=method)
+        if ntv2_sd_file:
+            sd_vals = gntv2.interpolate_ntv2(geoid_sd_grid, stn.lat.dec(), stn.lon.dec(), method=method)
+
+            # recompute station variance matrix
+            if stn.vcv is not None:
+                vcv_enu = gstat.vcv_cart2local(stns[stn.name].vcv, stns[stn.name].lat.dec(), stns[stn.name].lon.dec())
+                vcv_enu[2, 2] += sd_vals[0]**2
+                vcv_ohgt = gstat.vcv_local2cart(vcv_enu, stns[stn.name].lat.dec(), stns[stn.name].lon.dec())
+            else:
+                vcv_ohgt = None
+
+        # write to ohgt_stns dict as Station object
+        ohgt_stns[stn.name] = Station(
+            name=stn.name,
+            description=stn.description,
+            con=stn.con,
+            lat=stn.lat,
+            lon=stn.lon,
+            ohgt=stn.ehgt - n_vals[0],
+            ehgt=stn.ehgt,
+            sd_e=stn.sd_e,
+            sd_n=stn.sd_n,
+            sd_u=(stn.sd_u**2 + sd_vals[0]**2)**0.5 if ntv2_sd_file else stn.sd_u,
+            hpu=stn.hpu,
+            vpu=(stn.sd_u**2 + sd_vals[0]**2)**0.5 * 1.96 if ntv2_sd_file else stn.vpu,
+            smaj=stn.smaj,
+            smin=stn.smin,
+            brg=stn.brg,
+            vcv=vcv_ohgt if ntv2_sd_file else stn.vcv,
+            covariances=stn.covariances
+        )
+
+    return ohgt_stns
+
 
 # ----------------------------------------------------------------------
 # Example use
