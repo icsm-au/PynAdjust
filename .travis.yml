@@ -1,0 +1,43 @@
+language: python
+python:
+  - "3.6"
+
+before_install:
+  - pip install pytest pytest-cov coveralls flask
+
+install:
+  - sudo apt-get update
+  # We do this conditionally because it saves us some downloading if the
+  # version is the same.
+  - if [[ "$TRAVIS_PYTHON_VERSION" == "2.7" ]]; then
+      wget https://repo.continuum.io/miniconda/Miniconda2-latest-Linux-x86_64.sh -O miniconda.sh;
+    else
+      wget https://repo.continuum.io/miniconda/Miniconda3-latest-Linux-x86_64.sh -O miniconda.sh;
+    fi
+  - bash miniconda.sh -b -p $HOME/miniconda
+  - export PATH="$HOME/miniconda/bin:$PATH"
+  - hash -r
+  - conda config --set always_yes yes --set changeps1 no
+  - conda update -q conda
+  # Useful for debugging any issues with conda
+  - conda info -a
+  - conda create -q -n test-environment python=$TRAVIS_PYTHON_VERSION numpy pyshp
+  - source activate test-environment
+  - pip install geodepy pytest pytest-cov coveralls
+
+script:
+  - py.test --cov-report term-missing:skip-covered --cov=pynadjust pynadjust/tests/
+
+deploy:
+  provider: pypi
+  # Deploy to test version of pypi - remove for official deployment
+  server: https://test.pypi.org/legacy/
+  on:
+    tags: true
+  user:
+    secure: "Qjl2LV1lIGwSPoKzOL9m2VEbXLZ5POt+Wf4aePhvsCV48/7+e19Ja4zO4d0tviyOlbLUulktQ9KEbKXw21avcKPv6G3+ZPng3dnUBHDbbt65TkFp7EvIKT/GkRGvoxRYuVyy4aCXU88L0bQleJVuKRY29/YVMOZeJiRI8BWlnYU27gthttR4UMs+v4oNt5fyBNdxexq64BBjADOpftYRcPVx7qE6NSXiuLRFvR/4iRpZFC7FpYjTPTX11Yf62hYgItpxckvGP/a6seEQT258JwI2s+YoU1N0dRKP3Y62s4EhAx8fHlZPbN4lQcpaY2aLckfu5Upa7OHJw2JzT4hE1X3P872FOnDpV6IEFA5OKXfHebjvX9y5qpOQZDlC7qFdSFJ5+6iB16aGynJcl/s77dcR6Zvp60sd5rN/q+oOPyOQCejSPteXDBKpoHgIM/+MMtvfqiAaI88VHQET2wH4xU/xWYaR7QRyCgiHxOzHxfHhYimgOEsxh6dBR44r5QM68GDfDDjJ5bWo5UkAuA918UVPzyHq/7ueSbBaH6Lo+VO+eHL681lm1qkMoTON28P5lpTH+ki5afJSF74yAQ9H7qFwoHzU9uHAIqbczlg+AQYN9qQw8iSXR/1ICHDfzHy/Ns8Vm2PFqB/CT2JPbaAbh/4ogJoCB9ndgOFlrFa1gVw="
+  password:
+    secure: "ide18wj2c8xluaCL22eTMRx9mQrYEJLBFuAhXdZL2hyAEPd2H8bTl1ppeTR81HBr75Q3SAfi7mxnnzQ0BZvl1BWfi5W0GvFFxJUTO9EyPTOMQyo1ofprNQ7pzrxizsNReNMVeUADGVWD6luQOHzwgUpAabHl7rzhHVfH8Uygqv6dIBeDUeDIVDTZ7vuaIH48dEifCoICaGFAopiilxWGIJ8IHsdPjbfxyfZu1LCIqCfC/hd+4Qe8Np+63f+Ov+MphjwWcSlwveDwvnzOV1LQCR5NJzz0MJDvaj4ipJQWKVGFPTJgQTyug8UZ3Ns18QueTRcE/Di9Lmx9N5QC/pCHK7MtB4VLRuMExO1gOz+7QORnxoLfUr3nkgSK67RkTEkRRugqbZoiTO5vvOA21VxXBZe5/+uC5VXd7xURGcpk1Dh0g+vpoinmeOcodo9jCCBGaMiaxVXBjgyvsJAvlIIOabZnsK8ecSZ+Y7ALQq1quOR8rnlmTWBsionwYymceVBTK7gyPAMRaov/zlTswtBKFwmER75UxmRkDtshvdObCzIssLbmScRlzUgSaSOZc0p4vC2ZuJHNm22aBaXPZUTq4IMl5g3twaFpxL06pOLDePdffp2yoQTP9CVPw0XY50i/I89nOvBKBqYScYeWiQA94y5EKCxdLlGSuM9BzhJut/w="
+
+after_success:
+  - coveralls
