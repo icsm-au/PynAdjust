@@ -217,7 +217,8 @@ def import_adj(f,db):
         for ln in adj_f.readlines():
             # Pause and skip line reading if following is true
             if (ln.strip()=='/n' 
-             or ln.strip()==''): continue
+             or ln.strip()==''
+             or ln.startswith('    ')): continue
             if ln.startswith('+ Initialising adjustment'): c_ln=-1
             if ln.startswith('Adjusted Coordinates'): c_ln=-1
             if ln.startswith('Adjusted Measurements'): c_ln=-1
