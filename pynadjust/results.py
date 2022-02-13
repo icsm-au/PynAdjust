@@ -207,22 +207,31 @@ class DynaResults(object):
                         m.epoch = metadata[m.msr_id[0]]['epoch']
                         m.source = metadata[m.msr_id[0]]['source']
 
-    def write_shp(self, network_name):
+    def write_shp(self, network_name, shp_dir=None):
         """
         Method to write shapefiles of network.
         :param network_name: name of network - must not contain full stops (truncated by pyshp).
+        :param shp_dir: Optional argument - specify location for shapefiles to be written (string/path-like).
         :return:
         """
+        start_dir = os.getcwd()
 
-        if self.stns:
+        # change to shp directory
+        if shp_dir:
+            os.chdir(shp_dir)
+        else:
             check_enter_dir('shp')
+
+        # create shapefiles
+        if self.stns:
             write_stn_shapefile(self.stns, network_name, ref_frame=self.adj_metadata.reference_frame)
 
             if self.msrs:
                 write_msr_shapefile(stns=self.stns, msrs=self.msrs, network_name=network_name,
                                     ref_frame=self.adj_metadata.reference_frame)
 
-            os.chdir('..')
+        # return to previous active directory
+        os.chdir(start_dir)
 
     def compute_group_vf(self, source=None):
         """
