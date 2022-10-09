@@ -604,7 +604,7 @@ class Measurement(object):
                   f'msr_sd {self.msr_sd}; adj_sd {self.adj_sd}; cor_sd {self.cor_sd}; nstat {self.nstat}; ' \
                   f'self.tstat {self.tstat}; pelzer {self.pelzer}; pre_adj_cor {self.pre_adj_cor}; ' \
                   f'outlier {self.outlier}; msr_id; {self.msr_id}; cluster_id; {self.cluster_id}; ' \
-                  f'epoch {self.epoch}; source {self.source}; line_ref {line_ref}'
+                  f'epoch {self.epoch}; source {self.source}; line_ref {self.line_ref}'
 
         return out_str
 
@@ -1631,7 +1631,7 @@ def read_msr_line(line, tstat_switch, msr_id_switch):
     line_msr.stn2 = line[22:42].strip() if line[22:42].strip() else None
     line_msr.stn3 = line[42:62].strip() if line[42:62].strip() else None
     if line[62:65].strip() == '*':
-        line_msr.ignore == True
+        line_msr.ignore = True
 
     if line_msr.msr_type == 'D':
         if msr_id_switch:
