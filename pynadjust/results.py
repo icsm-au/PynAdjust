@@ -574,7 +574,7 @@ class DynaResults(object):
 class Measurement(object):
     def __init__(self, msr_type=None, stn1=None, stn2=None, stn3=None, ignore=None, cardinal=None, msr=None, adj=None,
                  cor=None, msr_sd=None, adj_sd=None, cor_sd=None, nstat=None, tstat=None, pelzer=None, pre_adj_cor=None,
-                 outlier=None, msr_id=None, cluster_id=None, epoch=None, source=None):
+                 outlier=None, msr_id=None, cluster_id=None, epoch=None, source=None, line_ref=None):
         self.msr_type = msr_type
         self.stn1 = stn1
         self.stn2 = stn2
@@ -596,6 +596,7 @@ class Measurement(object):
         self.cluster_id = cluster_id
         self.epoch = epoch
         self.source = source
+        self.line_ref = line_ref
 
     def __repr__(self):
         out_str = f'msr_type {self.msr_type}; stn1 {self.stn1}; stn2 {self.stn2}; stn3 {self.stn3}; ' \
@@ -603,7 +604,7 @@ class Measurement(object):
                   f'msr_sd {self.msr_sd}; adj_sd {self.adj_sd}; cor_sd {self.cor_sd}; nstat {self.nstat}; ' \
                   f'self.tstat {self.tstat}; pelzer {self.pelzer}; pre_adj_cor {self.pre_adj_cor}; ' \
                   f'outlier {self.outlier}; msr_id; {self.msr_id}; cluster_id; {self.cluster_id}; ' \
-                  f'epoch {self.epoch}; source {self.source}'
+                  f'epoch {self.epoch}; source {self.source}; line_ref {line_ref}'
 
         return out_str
 
@@ -988,7 +989,8 @@ def read_adj_file(adj_file, stns=None, msrs=None, adj_metadata=None, file_metada
                         pre_adj_cor=[],
                         outlier=[],
                         msr_id=[line_msr.msr_id],
-                        cluster_id=[line_msr.cluster_id]
+                        cluster_id=[line_msr.cluster_id],
+                        line_ref=line_count + 1
                     )
 
                     msrs.append(msr_object)
@@ -1035,7 +1037,8 @@ def read_adj_file(adj_file, stns=None, msrs=None, adj_metadata=None, file_metada
                                 pre_adj_cor=[float(line_msr.pre_adj_cor)],
                                 outlier=[line_msr.outlier],
                                 msr_id=line_msr.msr_id,
-                                cluster_id=line_msr.cluster_id
+                                cluster_id=line_msr.cluster_id,
+                                line_ref=line_count + 1
                             )
                         )
 
@@ -1086,7 +1089,8 @@ def read_adj_file(adj_file, stns=None, msrs=None, adj_metadata=None, file_metada
                             pre_adj_cor=float(line_msr.pre_adj_cor),
                             outlier=line_msr.outlier,
                             msr_id=line_msr.msr_id,
-                            cluster_id=line_msr.cluster_id
+                            cluster_id=line_msr.cluster_id,
+                            line_ref=line_count + 1
                         )
                     )
 
