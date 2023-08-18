@@ -5,9 +5,9 @@ PynAdjust - Survey Convert - Leica Infinity SKI-ASCII Format Module
 Author - Nuddin Tengku
 Purpose - To provide functionality to enable conversion of SKI-ASCII (Leica Infinity output) GNSS data to DynaML format
 Notes - SKI-ASCII needs to be exported as 'WGS-84 Cartesian'
-      - Fixes: Ross Bug (29/9/2023), scale
-               Bill Payse (2/2/2022), LLh
-               Nuddin Tengku (18/8/2023), ITRF conditions 
+      - Fixes: Ross Bug (29/9/2023), correct sigma a posteriori 
+               Bill Payse (2/2/2022), correct LLh symbology
+               Nuddin Tengku (18/8/2023), assign ref frame based on date & simplify math
 
 For information about DynaML schema definition, see DynAdjust Users Guide Appendix B.3
 
@@ -99,12 +99,12 @@ def msr2xml(skiasciifile):
 
        # Sigma a posteriori
         if linetype == '@&' and linebatchdict[linebatch][0][4] == 'MEAS':
-            sxx = str(float(line[2])/(1/(float(line[1])**2)))
-            sxy = str(float(line[3])/(1/(float(line[1])**2)))
-            sxz = str(float(line[4])/(1/(float(line[1])**2)))
-            syy = str(float(line[5])/(1/(float(line[1])**2)))
-            syz = str(float(line[6])/(1/(float(line[1])**2)))
-            szz = str(float(line[7].rstrip())/(1/(float(line[1])**2)))
+            sxx = str(float(line[2]) * float(line[1])**2)
+            sxy = str(float(line[3]) * float(line[1])**2)
+            sxz = str(float(line[4]) * float(line[1])**2)
+            syy = str(float(line[5]) * float(line[1])**2)
+            syz = str(float(line[6]) * float(line[1])**2)
+            szz = str(float(line[7].rstrip()) * float(line[1])**2)
 
         # Individual baseline information (Reference point of baseline and its coordinates)
         if linetype == '@+':
