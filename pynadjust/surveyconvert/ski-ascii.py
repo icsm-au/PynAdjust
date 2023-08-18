@@ -2,12 +2,12 @@
 
 """
 PynAdjust - Survey Convert - Leica Infinity SKI-ASCII Format Module
-Author - Ross Bugg (adopted from Nuddin Tengku's ski-ascii.py)
+Author - Nuddin Tengku
 Purpose - To provide functionality to enable conversion of SKI-ASCII (Leica Infinity output) GNSS data to DynaML format
 Notes - SKI-ASCII needs to be exported as 'WGS-84 Cartesian'
-
-MODIFIED CODE FROM ORIGINAL SKI-ASCII.py by Nuddin Tengku
-Modifications start at Line 104, Line 126 and Line 146
+      - Fixes: Ross Bug (29/9/2023), scale
+               Bill Payse (2/2/2022), LLh
+               Nuddin Tengku (18/8/2023), ITRF conditions 
 
 For information about DynaML schema definition, see DynAdjust Users Guide Appendix B.3
 
@@ -17,9 +17,11 @@ https://github.com/icsm-au/DynAdjust/blob/master/resources/DynAdjust%20Users%20G
 
 import os
 import lxml.etree as ET
+from datetime import datetime
 from pynadjust.surveyconvert.dynaml import *
 from geodepy.transform import xyz2llh, geo2grid
 from geodepy.convert import dec2hp
+
 
 # Example 'Pynadjust\\tests\\resources\\skiasciisample.asc'
 
@@ -40,7 +42,7 @@ def stn2xml(skiasciifile):
     namelist = []
     # Station constants
     constraint = 'FFF'
-    coordtype = 'LLH'
+    coordtype = 'LLh'
     for line in stnlines:
         linetype = line[0][0:2]
         if line[0] == "@%Coordinate":
@@ -60,7 +62,8 @@ def stn2xml(skiasciifile):
             # Code will only take if output format is Cartesian
             if linebatch >= 1:
                 if outputformat == 'Cartesian' and name not in namelist:
-                    stnroot = addstnrecord(stnroot, name, constraint, coordtype, xaxis, yaxis, height, zone, desc)
+                    stnroot = addstnrecord(
+                        stnroot, name, constraint, coordtype, xaxis, yaxis, height, zone, desc)
                     namelist.append(line[0][2:])
         if linebatch in linebatchdict:
             linebatchdict[linebatch].append(line)
@@ -85,14 +88,13 @@ def msr2xml(skiasciifile):
     linebatchdict = {}
     linebatch = 0
     # Measurement constants
-    refframe = 'ITRF2014'
     vscale = '100.000'
     scale = '1.000'
     for line in msrlines:
         linetype = line[0][0:2]
         if linetype == '@#':
-        
-       # Start of line batch
+
+           # Start of line batch
             linebatch += 1
 
        # Sigma a posteriori
@@ -103,30 +105,35 @@ def msr2xml(skiasciifile):
             syy = str(float(line[5])/(1/(float(line[1])**2)))
             syz = str(float(line[6])/(1/(float(line[1])**2)))
             szz = str(float(line[7].rstrip())/(1/(float(line[1])**2)))
-            
+
         # Individual baseline information (Reference point of baseline and its coordinates)
         if linetype == '@+':
             firststn = line[0][2:]
-            
+
         # Baseline vector components
         if linetype == "@-":
             secondstn = line[0][2:]
             x = line[1]
             y = line[2]
             z = line[3].rstrip()
-            
+
         # Date and time of first common epoch
         if linetype == '@*':
             epoch = line[0][2:]
-    
-        #Add baseline when next batch of data is cycled
+            epoch_datetime = datetime.strptime(epoch, "%d.%m.%Y")
+            if epoch_datetime >= datetime.strptime("27.11.2022", "%d.%m.%Y"):
+                refframe = 'ITRF2020'
+            else:
+                refframe = 'ITRF2014'
+
+        # Add baseline when next batch of data is cycled
             msrroot = addgnssbaseline(msrroot, refframe, epoch, vscale, scale, scale, scale, firststn, secondstn,
-                                              x, y, z, sxx, sxy, sxz, syy, syz, szz)
+                                      x, y, z, sxx, sxy, sxz, syy, syz, szz)
         if linebatch in linebatchdict:
             linebatchdict[linebatch].append(line)
         else:
             linebatchdict[linebatch] = [line]
-    
+
     return msrroot
 
 
@@ -135,8 +142,10 @@ if __name__ == "__main__":
     skiasciiname = os.path.splitext(skiasciifile)[0]
     stnroot = stn2xml(skiasciifile)
     msrroot = msr2xml(skiasciifile)
-    stndata = ET.tostring(stnroot, pretty_print='True', xml_declaration='True', encoding='utf-8')
-    msrdata = ET.tostring(msrroot, pretty_print='True', xml_declaration='True', encoding='utf-8')
+    stndata = ET.tostring(stnroot, pretty_print='True',
+                          xml_declaration='True', encoding='utf-8')
+    msrdata = ET.tostring(msrroot, pretty_print='True',
+                          xml_declaration='True', encoding='utf-8')
 
     with open(skiasciiname + '_stn.xml', 'wb') as stnxml:
         stnxml.write(stndata)
