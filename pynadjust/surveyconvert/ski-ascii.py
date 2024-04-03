@@ -40,7 +40,7 @@ def stn2xml(skiasciifile):
     namelist = []
     # Station constants
     constraint = 'FFF'
-    coordtype = 'LLH'
+    coordtype = 'LLh'
     for line in stnlines:
         linetype = line[0][0:2]
         if line[0] == "@%Coordinate":
