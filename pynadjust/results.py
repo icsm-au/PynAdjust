@@ -1,6 +1,7 @@
 # pynadjust results module - retrieve data from DynAdjust output files and perform various functions
 
 import datetime
+import pathlib
 import geodepy.convert as gc
 import geodepy.geodesy as gg
 import geodepy.ntv2reader as gntv2
@@ -96,7 +97,8 @@ class RelativeUncertainty(object):
 
 class CoordDiff():
     def __init__(self, name=None, d_east=None, d_north=None, d_zone=None, d_ehgt=None, d_ohgt=None,
-                 brg=None, dist=None):
+                 brg=None, dist=None, d_sd_e=None, d_sd_n=None, d_sd_u=None,
+                 sigma_hpu=None, sigma_vpu=None, h_within_pu=None, v_within_pu=None):
         self.name = name
         self.d_east = d_east
         self.d_north = d_north
@@ -105,6 +107,41 @@ class CoordDiff():
         self.d_ohgt = d_ohgt
         self.brg = brg
         self.dist = dist
+        self.d_sd_e = d_sd_e              # change in sd
+        self.d_sd_n = d_sd_n
+        self.d_sd_u = d_sd_u
+        self.sigma_hpu = sigma_hpu        # combined uncertainty
+        self.sigma_vpu = sigma_vpu
+        self.h_within_pu = h_within_pu    # true/false; horizontal distance within combined uncertainty
+        self.v_within_pu = v_within_pu    # true/false; vertical difference within combined uncertainty
+
+
+class MsrDiff():
+    def __init__(self, msr_type=None, stn1=None, stn2=None, stn3=None, ignore=None, cardinal=None, d_msr=None,
+                 d_adj=None, d_cor=None, d_msr_sd=None, d_adj_sd=None, d_cor_sd=None, d_nstat=None, d_tstat=None,
+                 d_pelzer=None, d_pre_adj_cor=None, outlier=None, msr_id=None, cluster_id=None, epoch=None,
+                 source=None):
+        self.msr_type = msr_type
+        self.stn1 = stn1
+        self.stn2 = stn2
+        self.stn3 = stn3
+        self.ignore = ignore
+        self.cardinal = cardinal
+        self.d_msr = d_msr
+        self.d_adj = d_adj
+        self.d_cor = d_cor
+        self.d_msr_sd = d_msr_sd
+        self.d_adj_sd = d_adj_sd
+        self.d_cor_sd = d_cor_sd
+        self.d_nstat = d_nstat
+        self.d_tstat = d_tstat
+        self.d_pelzer = d_pelzer
+        self.d_pre_adj_cor = d_pre_adj_cor
+        self.outlier = outlier
+        self.msr_id = msr_id
+        self.cluster_id = cluster_id
+        self.epoch = epoch
+        self.source = source
 
 
 class DynaResults(object):
@@ -260,6 +297,10 @@ class DynaResults(object):
         if not self.msrs:
             raise ValueError(f'GroupVF cannot be computed; No measurments present')
 
+        if float(self.adj_stats.degrees_of_freedom) < 1:
+            raise ValueError(f'Insufficient degrees of freedom [{self.adj_stats.degrees_of_freedom}] '
+                             f'to compute group variance factors')
+
         groups = {}
 
         for m in self.msrs:
@@ -396,6 +437,7 @@ class DynaResults(object):
                 var2=self.stns[stn2].vcv,
                 cov12=cov
             )
+
             r_hz = gstat.circ_hz_pu(r_err[0], r_err[1])
             r_vt = r_err[3] * 1.96
 
@@ -455,6 +497,9 @@ class DynaResults(object):
         Method to count msr types across the whole adjustment
         :return:
         """
+        # reset counts
+        self.msr_counts = MsrCounts()
+
         for t in msr_types:
             msr_group = [m for m in self.msrs if m.msr_type == t]
 
@@ -496,6 +541,8 @@ class DynaResults(object):
             elif t == 'X':
                 self.msr_counts.x += len(msr_group) * 3
             elif t == 'Y':
+                self.msr_counts.y += len(msr_group) * 3
+            elif t == 'Z':
                 self.msr_counts.z += len(msr_group) * 3
 
         # sum total
@@ -565,10 +612,181 @@ class DynaResults(object):
                 self.stn_msr_counts[m.stn2].x += 1
             elif m.msr_type == 'Y':
                 self.stn_msr_counts[m.stn1].y += 1
+            elif m.msr_type == 'Z':
+                self.stn_msr_counts[m.stn1].z += 1
 
         # sum total at each station
         for stn in self.stn_msr_counts.values():
             stn.sum_msr_counts()
+
+
+class CompareAdj():
+    def __init__(self, adj_1, adj_2, compare_msr=False):
+        self.adj_1 = adj_1
+        self.adj_2 = adj_2
+
+        self.coord_diffs, self.stns_added, self.stns_removed, self.msr_diffs, self.msrs_added, self.msrs_removed, \
+            self.warnings = compare_adj(adj_1=adj_1, adj_2=adj_2, compare_msrs=compare_msr)
+
+    def write_shp(self, adj_1_name, adj_2_name, shp_dir=None):
+        """
+        Method to create shapefiles of changes between two DynAdjust adjustments
+        :param adj_1_name: string. Shapefile prefix of adjustment 1
+        :param adj_2_name: string. Shapefile prefix of adjustment 2
+        :return:
+        """
+
+        # change to shp directory
+        start_dir = os.getcwd()
+        if shp_dir:
+            os.chdir(shp_dir)
+        else:
+            check_enter_dir('shp')
+
+        # station shapefiles
+        if self.coord_diffs:
+            write_coord_diff_shapefile(
+                coord_diffs=self.coord_diffs,
+                network_name=f'{adj_2_name}-{adj_1_name}_diff_stns',
+                stns=self.adj_2.stns,
+                ref_frame=self.adj_2.adj_metadata.reference_frame
+            )
+
+        if self.stns_added:
+            write_stn_shapefile(
+                stns=self.stns_added,
+                network_name=f'{adj_2_name}_new_stns',
+                ref_frame=self.adj_2.adj_metadata.reference_frame
+            )
+
+        if self.stns_removed:
+            write_stn_shapefile(
+                stns=self.stns_removed,
+                network_name=f'{adj_1_name}_removed_stns',
+                ref_frame=self.adj_1.adj_metadata.reference_frame
+            )
+
+        # measurement shapefiles
+        if self.msr_diffs:
+            write_msr_diffs_shapefile(
+                network_name=f'{adj_2_name}-{adj_1_name}_diff_msrs',
+                stns=self.adj_2.stns,
+                msr_diffs=self.msr_diffs,
+                ref_frame=self.adj_2.adj_metadata.reference_frame
+            )
+
+        if self.msrs_added:
+            write_msr_shapefile(
+                stns=self.adj_2.stns,
+                msrs=self.msrs_added,
+                network_name=f'{adj_2_name}_new_msrs',
+                ref_frame=self.adj_2.adj_metadata.reference_frame
+            )
+
+        if self.msrs_removed:
+            write_msr_shapefile(
+                stns=self.adj_1.stns,
+                msrs=self.msrs_removed,
+                network_name=f'{adj_1_name}_removed_msrs',
+                ref_frame=self.adj_1.adj_metadata.reference_frame
+            )
+
+        # return to previous active directory
+        os.chdir(start_dir)
+
+    def write_summary(self, fh=None):
+        """
+        Method to write a summary of differences between two DynAdjust adjustments
+        :param fh: Optional file handle. returns a string if None
+        :return:
+        """
+        rpt_str = 'PynAdjust Adjustment Comparison Report\n'
+        rpt_str += f'{"-" * 60}\n'
+        rpt_str += f'Created:              {str(datetime.datetime.now())[:19]}\n'
+        rpt_str += f'Network 1:            {self.adj_1.xyz_file.name}\n'
+        rpt_str += f'Network 2:            {self.adj_2.xyz_file.name}\n'
+        # rpt_str += f'Confidence Interval:  {self.adj_1.adj_stats.confidence_interval}\n'
+        rpt_str += f'{"-" * 60}\n'
+
+        # report added/removed stns
+        rpt_str += f'Stations added:       {len(self.stns_added):10d}\n'
+        rpt_str += f'Stations removed:     {len(self.stns_removed):10d}\n'
+        rpt_str += f'Measurements added:   {len(self.msrs_added):10d}\n' if self.msrs_added is not None else ''
+        rpt_str += f'Measurements removed: {len(self.msrs_removed):10d}\n' if self.msrs_removed is not None else ''
+
+        # report largest hz/vt changes
+        diff_list = list(self.coord_diffs.values())
+        diff_list.sort(key=lambda x: x.dist, reverse=True)
+        rpt_str += f'largest hz change:    {diff_list[0].dist:10.4f} ({diff_list[0].name})\n'
+        diff_list.sort(key=lambda x: abs(x.d_ehgt), reverse=True)
+        rpt_str += f'largest vt change:    {diff_list[0].d_ehgt:10.4f} ({diff_list[0].name})\n'
+
+        rpt_str += f'{"-" * 60}\n\n'
+
+        plural = '' if len(self.stns_added) == 1 else 's'
+        rpt_str += f'Detected {len(self.stns_added)} station{plural} in {self.adj_2.xyz_file.name} not present in {self.adj_1.xyz_file.name}\n'
+        rpt_str += f'{"-" * 60}\n'
+        for stn in sorted(self.stns_added):
+            rpt_str += f'{stn}\n'
+        rpt_str += '\n'
+
+        plural = '' if len(self.stns_removed) == 1 else 's'
+        rpt_str += f'Detected {len(self.stns_removed)} station{plural} in {self.adj_1.xyz_file.name} not present in {self.adj_2.xyz_file.name}\n'
+        rpt_str += f'{"-" * 60}\n'
+        for stn in sorted(self.stns_removed):
+            rpt_str += f'{stn}\n'
+        rpt_str += '\n'
+
+        # consider adding msr differences when comparison algorithm is streamlined
+
+        if fh:
+            fh.write(rpt_str)
+
+    def detect_stn_movement(self, fh=None):
+        """
+        Method to detect and report stations which exhibit apparent movement outside the adjusted positional uncertainty
+        :param fh: Optional file handle. returns a string if None
+        :return:
+        """
+
+        # check if apu files have been read
+        if self.adj_1.file_metadata.apu_filename is None or self.adj_2.file_metadata.apu_filename is None:
+            raise ValueError('apu files for both networks are required for report_stn_movement call')
+
+        if self.adj_1.adj_stats.confidence_interval != self.adj_1.adj_stats.confidence_interval:
+            raise ValueError(f'Apu confidence intervals must be identical:\n '
+                             f'{self.adj_1.file_metadata.apu_filename}: {self.adj_1.adj_stats.confidence_interval}\n'
+                             f'{self.adj_2.file_metadata.apu_filename}: {self.adj_2.adj_stats.confidence_interval}')
+
+        h_stns = {stn.name for stn in self.coord_diffs.values() if stn.h_within_pu is False}
+        v_stns = {stn.name for stn in self.coord_diffs.values() if stn.v_within_pu is False}
+        all_stns = h_stns.union(v_stns)
+
+        # add some more metadata up front
+        rpt_str = 'PynAdjust Station Movement Report\n'
+        rpt_str += f'{"-"*60}\n'
+        rpt_str += f'Created:   {str(datetime.datetime.now())[:19]}\n'
+        rpt_str += f'Network 1:            {self.adj_1.file_metadata.xyz_filename}\n'
+        rpt_str += f'Network 2:            {self.adj_2.file_metadata.xyz_filename}\n'
+        rpt_str += f'Confidence Interval:  {self.adj_1.adj_stats.confidence_interval}\n'
+        rpt_str += f'{"-" * 60}\n\n'
+        rpt_str += f'Detected {len(all_stns)} stations with significant apparent movement\n'
+        rpt_str += f'{"Station":20}{"HzDist":>10s}{"SigmaHPU":>10s}{"dEhgt":>10s}{"SigmaVPU":>10s}\n'
+        rpt_str += f'{"-"*60}\n'
+
+        for stn_name in sorted(all_stns):
+            stn = self.coord_diffs[stn_name]
+            stn_str = f'{stn.name:20s}'
+
+            h_str = f'{stn.dist:10.4f}{stn.sigma_hpu:10.4f}' if stn.name in h_stns else f'{" "*20}'
+            v_str = f'{stn.d_ehgt:10.4f}{stn.sigma_vpu:10.4f}' if stn.name in v_stns else f'{" "*20}'
+
+            rpt_str += f'{stn_str}{h_str}{v_str}\n'
+
+            if fh:
+                fh.write(f'{stn_str}{h_str}{v_str}\n')
+
+        return rpt_str, h_stns, v_stns
 
 
 class Measurement(object):
@@ -798,6 +1016,10 @@ def read_xyz_file(xyz_file, stns=None, adj_metadata=None, file_metadata=None):
     adj_metadata = adj_metadata if adj_metadata != None else AdjMetadata()
     file_metadata = file_metadata if file_metadata != None else FileMetadata()
 
+    # convert to pathlib
+    if not isinstance(xyz_file, pathlib.Path):
+        xyz_file = pathlib.Path(xyz_file)
+
     with open(xyz_file, 'r') as f:
         switches = Switches(header=True)
         line_count = 0
@@ -860,6 +1082,10 @@ def read_adj_file(adj_file, stns=None, msrs=None, adj_metadata=None, file_metada
     adj_metadata = adj_metadata if adj_metadata != None else AdjMetadata()
     file_metadata = file_metadata if file_metadata != None else FileMetadata()
     adj_stats = adj_stats if adj_stats != None else AdjStats()
+
+    # convert to pathlib
+    if not isinstance(adj_file, pathlib.Path):
+        adj_file = pathlib.Path(adj_file)
 
     with open(adj_file, 'r') as f:
         switches = Switches(header=True)
@@ -948,7 +1174,7 @@ def read_adj_file(adj_file, stns=None, msrs=None, adj_metadata=None, file_metada
                     items = line[35:].strip().split()
                     adj_stats.chi_square_lower = float(items[0])
                     adj_stats.chi_square_upper = float(items[4])
-                    adj_stats.chi_square_result = items[6].strip()
+                    adj_stats.chi_square_result = items[6].strip() if 'NO REDUNDANCY' not in line else 'NO REDUNDANCY'
 
                     switches.reset()
 
@@ -1116,6 +1342,10 @@ def read_apu_file(apu_file, stns=None, adj_metadata=None, file_metadata=None, ad
     file_metadata = file_metadata if file_metadata != None else FileMetadata()
     adj_stats = adj_stats if adj_stats != None else AdjStats()
 
+    # convert to pathlib
+    if not isinstance(apu_file, pathlib.Path):
+        apu_file = pathlib.Path(apu_file)
+
     with open(apu_file) as f:
         switches = Switches(header=True)
         rotate_vcv = False
@@ -1269,31 +1499,7 @@ def write_msr_shapefile(stns, msrs, network_name, ref_frame):
     :param ref_frame: String. reference frame (for prj file creation)
     """
 
-    def find_cardinal(msrs_list):
-        """
-        function to determine 'cardinal' directions of DynAdjust GNSS measurements
-        :param msrs_list: list of Measurement objects (of common msr_type)
-        :return: string of cardinal directions: enu/XYZ
-        """
-
-        return 'enu' if msrs_list[0].cardinal == ['e', 'n', 'u'] else 'XYZ'
-
-    def max_stat(stat_list):
-        """
-        function to determine the maximum absolute value in a list
-        :param stat_list: list of floats
-        :return: maximum value
-        """
-        max_stat = None
-        for s in stat_list:
-            if not max_stat:
-                max_stat = s
-            elif abs(s) > abs(max_stat):
-                max_stat = s
-
-        return max_stat
-
-    # create shapefiles for each msr type
+    # create shapefiles for each msr type group
     for l in msr_types:
         result = [m for m in msrs if m.msr_type == l]
 
@@ -1319,6 +1525,7 @@ def write_msr_shapefile(stns, msrs, network_name, ref_frame):
                 w.field('msr_id', 'N')
                 w.field('epoch', 'C', size=10)
                 w.field('source', 'C')
+                w.field('line_ref', 'N')
 
                 for r in result:
                     w.line([
@@ -1327,7 +1534,7 @@ def write_msr_shapefile(stns, msrs, network_name, ref_frame):
                     ])
 
                     w.record(r.stn1, r.stn2, 'set zero', None, None, None, None, None, None,
-                             r.msr_id[0], r.epoch, r.source)
+                             r.msr_id[0], r.epoch, r.source, r.line_ref)
 
                     for s in range(len(r.stn3)):
                         msr = '{:3d} {:2d} {:7.4f}'.format(r.msr[s].degree, r.msr[s].minute, r.msr[s].second)
@@ -1340,7 +1547,7 @@ def write_msr_shapefile(stns, msrs, network_name, ref_frame):
 
                         # note: msr_ids are indexed 1 after other fields (1st is for ref direction)
                         w.record(r.stn1, r.stn3[s], msr, adj, r.cor[s], r.msr_sd[s], r.adj_sd[s], r.cor_sd[s],
-                                 r.nstat[s], r.msr_id[s + 1], r.epoch, r.source)
+                                 r.nstat[s], r.msr_id[s + 1], r.epoch, r.source, r.line_ref)
 
                 w.close()
 
@@ -1368,17 +1575,18 @@ def write_msr_shapefile(stns, msrs, network_name, ref_frame):
                     w.field('msr_id', 'N')
                     w.field('epoch', 'C', size=10)
                     w.field('source', 'C')
+                    w.field('line_ref', 'N')
 
                     for r in result:
 
                         if l in 'PQ':
                             w.point(stns[r.stn1].lon.dec(), stns[r.stn1].lat.dec())
                             w.record(r.stn1, r.msr.dec(), r.adj.dec(), r.cor, r.msr_sd, r.adj_sd, r.cor_sd, r.nstat,
-                                     r.msr_id, r.epoch, r.source)
+                                     r.msr_id, r.epoch, r.source, r.line_ref)
                         else:
                             w.point(stns[r.stn1].lon.dec(), stns[r.stn1].lat.dec())
                             w.record(r.stn1, r.msr, r.adj, r.cor, r.msr_sd, r.adj_sd, r.cor_sd, r.nstat,
-                                     r.msr_id, r.epoch, r.source)
+                                     r.msr_id, r.epoch, r.source, r.line_ref)
 
                 else:
                     cardinal = find_cardinal(result)
@@ -1410,6 +1618,7 @@ def write_msr_shapefile(stns, msrs, network_name, ref_frame):
                     w.field('msr_id', 'N')
                     w.field('epoch', 'C', size=10)
                     w.field('source', 'C')
+                    w.field('line_ref', 'N')
 
                     for r in result:
                         max_nstat = max_stat(r.nstat)
@@ -1426,7 +1635,7 @@ def write_msr_shapefile(stns, msrs, network_name, ref_frame):
                                  r.cor_sd[0], r.cor_sd[1], r.cor_sd[2],
                                  r.nstat[0], r.nstat[1], r.nstat[2],
                                  max_cor, max_nstat,
-                                 r.msr_id, r.epoch, r.source
+                                 r.msr_id, r.epoch, r.source, r.line_ref
                                  )
 
                 w.close()
@@ -1453,6 +1662,7 @@ def write_msr_shapefile(stns, msrs, network_name, ref_frame):
                         w.field('msr_id', 'N')
                         w.field('epoch', 'C', size=10)
                         w.field('source', 'C')
+                        w.field('line_ref', 'N')
 
                         for r in result:
                             w.line([
@@ -1464,7 +1674,7 @@ def write_msr_shapefile(stns, msrs, network_name, ref_frame):
                             adj = '{:3d} {:2d} {:7.4f}'.format(r.adj.degree, r.adj.minute, r.adj.second)
 
                             w.record(r.stn1, r.stn2, msr, adj, r.cor, r.msr_sd, r.adj_sd, r.cor_sd, r.nstat,
-                                     r.msr_id, r.epoch, r.source)
+                                     r.msr_id, r.epoch, r.source, r.line_ref)
 
                     else:
                         w.field('Stn1', 'C', size=20)
@@ -1479,6 +1689,7 @@ def write_msr_shapefile(stns, msrs, network_name, ref_frame):
                         w.field('msr_id', 'N')
                         w.field('epoch', 'C', size=10)
                         w.field('source', 'C')
+                        w.field('line_ref', 'N')
 
                         for r in result:
                             w.line([
@@ -1487,7 +1698,7 @@ def write_msr_shapefile(stns, msrs, network_name, ref_frame):
                             ])
 
                             w.record(r.stn1, r.stn2, r.msr, r.adj, r.cor, r.msr_sd, r.adj_sd, r.cor_sd, r.nstat,
-                                     r.msr_id, r.epoch, r.source)
+                                     r.msr_id, r.epoch, r.source, r.line_ref)
 
                 # G/X
                 else:
@@ -1521,6 +1732,7 @@ def write_msr_shapefile(stns, msrs, network_name, ref_frame):
                     w.field('msr_id', 'N')
                     w.field('epoch', 'C', size=10)
                     w.field('source', 'C')
+                    w.field('line_ref', 'N')
 
                     for r in result:
                         max_nstat = max_stat(r.nstat)
@@ -1540,7 +1752,7 @@ def write_msr_shapefile(stns, msrs, network_name, ref_frame):
                                  r.cor_sd[0], r.cor_sd[1], r.cor_sd[2],
                                  r.nstat[0], r.nstat[1], r.nstat[2],
                                  max_cor, max_nstat,
-                                 r.msr_id, r.epoch, r.source
+                                 r.msr_id, r.epoch, r.source, r.line_ref
                                  )
 
                 w.close()
@@ -1565,6 +1777,7 @@ def write_msr_shapefile(stns, msrs, network_name, ref_frame):
                 w.field('msr_id', 'N')
                 w.field('epoch', 'C', size=10)
                 w.field('source', 'C')
+                w.field('line_ref', 'N')
 
                 for r in result:
                     msr = '{:3d} {:2d} {:7.4f}'.format(r.msr.degree, r.msr.minute, r.msr.second)
@@ -1577,7 +1790,304 @@ def write_msr_shapefile(stns, msrs, network_name, ref_frame):
                          [stns[r.stn3].lon.dec(), stns[r.stn3].lat.dec()]],
                     ])
 
-                    w.record(r.stn1, r.stn2, r.stn3, r.msr, r.adj, r.cor, r.msr_sd, r.adj_sd, r.cor_sd, r.nstat)
+                    w.record(r.stn1, r.stn2, r.stn3, r.msr, r.adj, r.cor, r.msr_sd, r.adj_sd, r.cor_sd, r.nstat,
+                             r.line_ref)
+
+                w.close()
+
+
+def write_msr_diffs_shapefile(msr_diffs, stns, network_name, ref_frame=None):
+    """
+    Function to create shapefiles of MsrDiff objects
+    :param msr_diffs: lst of MsrDiff objects
+    :param stns: dictionary of Station objects
+    :param network_name:
+    :param ref_frame: Optional. Reference frame
+    :return:
+    """
+
+    # create shapefiles for each msr type group
+    for l in msr_types:
+        result = [m for m in msr_diffs if m.msr_type == l]
+
+        shp_name = network_name + '_' + l
+
+        if result:
+            # Direction sets
+            if l in multi_line_msrs:
+                write_prj(shp_name, ref_frame)
+
+                w = shapefile.Writer(shp_name, shapeType=3)
+                w.autoBalance = 1
+
+                w.field('Stn1', 'C', size=20)
+                w.field('Stn2', 'C', size=20)
+                w.field('d_msr', 'C')
+                w.field('d_adj', 'C')
+                w.field('d_cor', 'N', decimal=4)
+                w.field('d_msr_sd', 'N', decimal=4)
+                w.field('d_adj_sd', 'N', decimal=4)
+                w.field('d_cor_sd', 'N', decimal=4)
+                w.field('d_nstat', 'N', decimal=4)
+                w.field('msr_id', 'N')
+                w.field('epoch', 'C', size=10)
+                w.field('source', 'C')
+
+                for r in result:
+                    w.line([
+                        [[stns[r.stn1].lon.dec(), stns[r.stn1].lat.dec()],
+                         [stns[r.stn2].lon.dec(), stns[r.stn2].lat.dec()]],
+                    ])
+
+                    w.record(r.stn1, r.stn2, 'set zero', None, None, None, None, None, None,
+                             r.msr_id[0], r.epoch, r.source)
+
+                    for s in range(len(r.stn3)):
+                        msr = '{:3d} {:2d} {:7.4f}'.format(r.d_msr[s].degree, r.d_msr[s].minute, r.d_msr[s].second)
+                        adj = '{:3d} {:2d} {:7.4f}'.format(r.d_adj[s].degree, r.d_adj[s].minute, r.d_adj[s].second)
+
+                        w.line([
+                            [[stns[r.stn1].lon.dec(), stns[r.stn1].lat.dec()],
+                             [stns[r.stn3[s]].lon.dec(), stns[r.stn3[s]].lat.dec()]],
+                        ])
+
+                        # note: msr_ids are indexed 1 after other fields (1st is for ref direction)
+                        w.record(r.stn1, r.stn3[s], msr, adj, r.d_cor[s], r.d_msr_sd[s], r.d_adj_sd[s], r.d_cor_sd[s],
+                                 r.d_nstat[s], r.msr_id[s + 1], r.epoch, r.source)
+
+                w.close()
+
+            # H/I/J/P/Q/R/Y msrs
+            elif l in one_stn_msrs:
+                write_prj(shp_name, ref_frame)
+
+                w = shapefile.Writer(shp_name, shapeType=1)
+                w.autoBalance = 1
+
+                if l in 'IJPQ':
+                    msr_dec = 10
+                else:
+                    msr_dec = 4
+
+                if l not in three_line_msrs:
+                    w.field('Stn1', 'C', size=20)
+                    w.field('d_msr', 'N', decimal=msr_dec)
+                    w.field('d_adj', 'N', decimal=msr_dec)
+                    w.field('d_cor', 'N', decimal=4)
+                    w.field('d_msr_sd', 'N', decimal=4)
+                    w.field('d_adj_sd', 'N', decimal=4)
+                    w.field('d_cor_sd', 'N', decimal=4)
+                    w.field('d_nstat', 'N', decimal=4)
+                    w.field('msr_id', 'N')
+                    w.field('epoch', 'C', size=10)
+                    w.field('source', 'C')
+
+                    for r in result:
+
+                        if l in 'PQ':
+                            w.point(stns[r.stn1].lon.dec(), stns[r.stn1].lat.dec())
+                            w.record(r.stn1, r.d_msr.dec(), r.d_adj.dec(), r.d_cor, r.d_msr_sd, r.d_adj_sd, r.d_cor_sd,
+                                     r.d_nstat, r.msr_id, r.epoch, r.source)
+                        else:
+                            w.point(stns[r.stn1].lon.dec(), stns[r.stn1].lat.dec())
+                            w.record(r.stn1, r.d_msr, r.d_adj, r.d_cor, r.d_msr_sd, r.d_adj_sd, r.d_cor_sd, r.d_nstat,
+                                     r.msr_id, r.epoch, r.source)
+
+                else:
+                    cardinal = find_cardinal(result)
+
+                    w.field('Stn1', 'C', size=20)
+                    w.field('d_msr_' + cardinal[0], 'N', decimal=4)
+                    w.field('d_msr_' + cardinal[1], 'N', decimal=4)
+                    w.field('d_msr_' + cardinal[2], 'N', decimal=4)
+                    w.field('d_adj_' + cardinal[0], 'N', decimal=4)
+                    w.field('d_adj_' + cardinal[1], 'N', decimal=4)
+                    w.field('d_adj_' + cardinal[2], 'N', decimal=4)
+                    w.field('d_cor_' + cardinal[0], 'N', decimal=4)
+                    w.field('d_cor_' + cardinal[1], 'N', decimal=4)
+                    w.field('d_cor_' + cardinal[2], 'N', decimal=4)
+                    w.field('d_msr_sd_' + cardinal[0], 'N', decimal=4)
+                    w.field('d_msr_sd_' + cardinal[1], 'N', decimal=4)
+                    w.field('d_msr_sd_' + cardinal[2], 'N', decimal=4)
+                    w.field('d_adj_sd_' + cardinal[0], 'N', decimal=4)
+                    w.field('d_adj_sd_' + cardinal[1], 'N', decimal=4)
+                    w.field('d_adj_sd_' + cardinal[2], 'N', decimal=4)
+                    w.field('d_cor_sd_' + cardinal[0], 'N', decimal=4)
+                    w.field('d_cor_sd_' + cardinal[1], 'N', decimal=4)
+                    w.field('d_cor_sd_' + cardinal[2], 'N', decimal=4)
+                    w.field('d_nstat_' + cardinal[0], 'N', decimal=4)
+                    w.field('d_d_nstat_' + cardinal[1], 'N', decimal=4)
+                    w.field('d_nstat_' + cardinal[2], 'N', decimal=4)
+                    w.field('d_3D', 'N', decimal=4)
+                    w.field('msr_id', 'N')
+                    w.field('epoch', 'C', size=10)
+                    w.field('source', 'C')
+
+                    for r in result:
+                        d_3d = diff_3d(r.d_msr)
+
+                        w.point(stns[r.stn1].lon.dec(), stns[r.stn1].lat.dec())
+
+                        w.record(r.stn1,
+                                 r.d_msr[0], r.d_msr[1], r.d_msr[2],
+                                 r.d_adj[0], r.d_adj[1], r.d_adj[2],
+                                 r.d_cor[0], r.d_cor[1], r.d_cor[2],
+                                 r.d_msr_sd[0], r.d_msr_sd[1], r.d_msr_sd[2],
+                                 r.d_adj_sd[0], r.d_adj_sd[1], r.d_adj_sd[2],
+                                 r.d_cor_sd[0], r.d_cor_sd[1], r.d_cor_sd[2],
+                                 r.d_nstat[0], r.d_nstat[1], r.d_nstat[2],
+                                 d_3d,
+                                 r.msr_id, r.epoch, r.source
+                                 )
+
+                w.close()
+
+            # B/C/E/G/K/L/M/S/V/X/Z
+            elif l in two_stn_msrs:
+                write_prj(shp_name, ref_frame)
+
+                w = shapefile.Writer(shp_name, shapeType=3)
+                w.autoBalance = 1
+
+                # B/C/E/K/L/M/S/V/Z
+                if l not in three_line_msrs:
+                    if l in angle_msrs:
+                        w.field('Stn1', 'C', size=20)
+                        w.field('Stn2', 'C', size=20)
+                        w.field('d_msr', 'C')
+                        w.field('d_adj', 'C')
+                        w.field('d_cor', 'N', decimal=4)
+                        w.field('d_msr_sd', 'N', decimal=4)
+                        w.field('d_adj_sd', 'N', decimal=4)
+                        w.field('d_cor_sd', 'N', decimal=4)
+                        w.field('d_nstat', 'N', decimal=4)
+                        w.field('msr_id', 'N')
+                        w.field('epoch', 'C', size=10)
+                        w.field('source', 'C')
+
+                        for r in result:
+                            w.line([
+                                [[stns[r.stn1].lon.dec(), stns[r.stn1].lat.dec()],
+                                 [stns[r.stn2].lon.dec(), stns[r.stn2].lat.dec()]],
+                            ])
+
+                            msr = '{:3d} {:2d} {:7.4f}'.format(r.d_msr.degree, r.d_msr.minute, r.d_msr.second)
+                            adj = '{:3d} {:2d} {:7.4f}'.format(r.d_adj.degree, r.d_adj.minute, r.d_adj.second)
+
+                            w.record(r.stn1, r.stn2, msr, adj, r.d_cor, r.d_msr_sd, r.d_adj_sd, r.d_cor_sd, r.d_nstat,
+                                     r.msr_id, r.epoch, r.source)
+
+                    else:
+                        w.field('Stn1', 'C', size=20)
+                        w.field('Stn2', 'C', size=20)
+                        w.field('d_msr', 'N', decimal=4)
+                        w.field('d_adj', 'N', decimal=4)
+                        w.field('d_cor', 'N', decimal=4)
+                        w.field('d_msr_sd', 'N', decimal=4)
+                        w.field('d_adj_sd', 'N', decimal=4)
+                        w.field('d_cor_sd', 'N', decimal=4)
+                        w.field('d_nstat', 'N', decimal=4)
+                        w.field('msr_id', 'N')
+                        w.field('epoch', 'C', size=10)
+                        w.field('source', 'C')
+
+                        for r in result:
+                            w.line([
+                                [[stns[r.stn1].lon.dec(), stns[r.stn1].lat.dec()],
+                                 [stns[r.stn2].lon.dec(), stns[r.stn2].lat.dec()]],
+                            ])
+
+                            w.record(r.stn1, r.stn2, r.d_msr, r.d_adj, r.d_cor, r.d_msr_sd, r.d_adj_sd, r.d_cor_sd,
+                                     r.d_nstat, r.msr_id, r.epoch, r.source)
+
+                # G/X
+                else:
+                    cardinal = find_cardinal(result)
+
+                    w.field('Stn1', 'C', size=20)
+                    w.field('Stn2', 'C', size=20)
+                    w.field('d_msr_' + cardinal[0], 'N', decimal=4)
+                    w.field('d_msr_' + cardinal[1], 'N', decimal=4)
+                    w.field('d_msr_' + cardinal[2], 'N', decimal=4)
+                    w.field('d_adj_' + cardinal[0], 'N', decimal=4)
+                    w.field('d_adj_' + cardinal[1], 'N', decimal=4)
+                    w.field('d_adj_' + cardinal[2], 'N', decimal=4)
+                    w.field('d_cor_' + cardinal[0], 'N', decimal=4)
+                    w.field('d_cor_' + cardinal[1], 'N', decimal=4)
+                    w.field('d_cor_' + cardinal[2], 'N', decimal=4)
+                    w.field('d_d_msr_sd_' + cardinal[0], 'N', decimal=4)
+                    w.field('d_msr_sd_' + cardinal[1], 'N', decimal=4)
+                    w.field('d_msr_sd_' + cardinal[2], 'N', decimal=4)
+                    w.field('d_adj_sd_' + cardinal[0], 'N', decimal=4)
+                    w.field('d_d_adj_sd_' + cardinal[1], 'N', decimal=4)
+                    w.field('d_adj_sd_' + cardinal[2], 'N', decimal=4)
+                    w.field('d_d_cor_sd_' + cardinal[0], 'N', decimal=4)
+                    w.field('d_cor_sd_' + cardinal[1], 'N', decimal=4)
+                    w.field('d_cor_sd_' + cardinal[2], 'N', decimal=4)
+                    w.field('d_nstat_' + cardinal[0], 'N', decimal=4)
+                    w.field('d_nstat_' + cardinal[1], 'N', decimal=4)
+                    w.field('d_nstat_' + cardinal[2], 'N', decimal=4)
+                    w.field('d_3D', 'N', decimal=4)
+                    w.field('msr_id', 'N')
+                    w.field('epoch', 'C', size=10)
+                    w.field('source', 'C')
+
+                    for r in result:
+                        d_3d = diff_3d(r.d_msr)
+
+                        w.line([
+                            [[stns[r.stn1].lon.dec(), stns[r.stn1].lat.dec()],
+                             [stns[r.stn2].lon.dec(), stns[r.stn2].lat.dec()]],
+                        ])
+
+                        w.record(r.stn1, r.stn2,
+                                 r.d_msr[0], r.d_msr[1], r.d_msr[2],
+                                 r.d_adj[0], r.d_adj[1], r.d_adj[2],
+                                 r.d_cor[0], r.d_cor[1], r.d_cor[2],
+                                 r.d_msr_sd[0], r.d_msr_sd[1], r.d_msr_sd[2],
+                                 r.d_adj_sd[0], r.d_adj_sd[1], r.d_adj_sd[2],
+                                 r.d_cor_sd[0], r.d_cor_sd[1], r.d_cor_sd[2],
+                                 r.d_nstat[0], r.d_nstat[1], r.d_nstat[2],
+                                 d_3d,
+                                 r.msr_id, r.epoch, r.source
+                                 )
+
+                w.close()
+
+            # A (not D)
+            elif l in three_stn_msrs:
+                write_prj(shp_name, ref_frame)
+
+                w = shapefile.Writer(shp_name, shapeType=3)
+                w.autoBalance = 1
+
+                w.field('Stn1', 'C', size=20)
+                w.field('Stn2', 'C', size=20)
+                w.field('Stn3', 'C', size=20)
+                w.field('d_msr', 'C')
+                w.field('d_adj', 'C')
+                w.field('d_cor', 'N', decimal=4)
+                w.field('d_msr_sd', 'N', decimal=4)
+                w.field('d_adj_sd', 'N', decimal=4)
+                w.field('d_cor_sd', 'N', decimal=4)
+                w.field('d_nstat', 'N', decimal=4)
+                w.field('msr_id', 'N')
+                w.field('epoch', 'C', size=10)
+                w.field('source', 'C')
+
+                for r in result:
+                    msr = '{:3d} {:2d} {:7.4f}'.format(r.msr.degree, r.msr.minute, r.msr.second)
+                    adj = '{:3d} {:2d} {:7.4f}'.format(r.adj.degree, r.adj.minute, r.adj.second)
+
+                    w.line([
+                        [[stns[r.stn1].lon.dec(), stns[r.stn1].lat.dec()],
+                         [stns[r.stn2].lon.dec(), stns[r.stn2].lat.dec()]],
+                        [[stns[r.stn2].lon.dec(), stns[r.stn2].lat.dec()],
+                         [stns[r.stn3].lon.dec(), stns[r.stn3].lat.dec()]],
+                    ])
+
+                    w.record(r.stn1, r.stn2, r.stn3, r.d_msr, r.d_adj, r.d_cor, r.d_msr_sd, r.d_adj_sd, r.d_cor_sd,
+                             r.d_nstat)
 
                 w.close()
 
@@ -1635,9 +2145,12 @@ def read_msr_line(line, tstat_switch, msr_id_switch):
 
     if line_msr.msr_type == 'D':
         if msr_id_switch:
-            items = line.split()
-            line_msr.cluster_id = items[-1].strip()
-            line_msr.msr_id = items[-2]
+            if tstat_switch:
+                line_msr.msr_id = line[216:226].strip() if line[216:226].strip() else None
+                line_msr.cluster_id = line[226:236].strip() if line[226:236].strip() else None
+            else:
+                line_msr.msr_id = line[205:216].strip() if line[205:216].strip() else None
+                line_msr.cluster_id = line[216:226].strip() if line[216:226].strip() else None
 
         return line_msr
     else:
@@ -1656,16 +2169,16 @@ def read_msr_line(line, tstat_switch, msr_id_switch):
             line_msr.pre_adj_cor = line[190:204].strip()
             line_msr.outlier = line[204:216].strip()
             if msr_id_switch:
-                line_msr.msr_id = line[216:226].strip()
-                line_msr.cluster_id = line[226:236].strip()
+                line_msr.msr_id = line[216:226].strip() if line[216:226].strip() else None
+                line_msr.cluster_id = line[226:236].strip() if line[226:236].strip() else None
 
         else:
             line_msr.pelzer = line[167:178].strip()
             line_msr.pre_adj_cor = line[180:193].strip()
             line_msr.outlier = line[204:205]
             if msr_id_switch:
-                line_msr.msr_id = line[205:216].strip()
-                line_msr.cluster_id = line[216:226].strip()
+                line_msr.msr_id = line[205:216].strip() if line[205:216].strip() else None
+                line_msr.cluster_id = line[216:226].strip() if line[216:226].strip() else None
 
         return line_msr
 
@@ -1716,7 +2229,7 @@ def read_metadata_tf(line, search_text, current_value):
     :param current_value: stored value. Updated when search_text is successfully found.
     :return: either current value or True/False corresponding to search_text
     """
-    if line[:35] == search_text.ljust(35, ' '):
+    if search_text in line[:35]:
         if line[35:].strip() == 'Yes':
             return True
         else:
@@ -1834,6 +2347,54 @@ def write_stn_shapefile(stns, network_name, ref_frame=None):
     w.close()
 
 
+def write_coord_diff_shapefile(coord_diffs, stns, network_name, ref_frame=None):
+    """
+    function to write shapefiles of CoordDiff objects
+    :param coord_diffs: dictionary of CoordDiff objects
+    :param stns: dictionary of Station objects
+    :param network_name: name of network (used in shapefile name output)
+    :param ref_frame: optional, reference frame of coordinates
+    """
+
+    shp_name = network_name + '_stn'
+
+    write_prj(shp_name, ref_frame)
+
+    w = shapefile.Writer(shp_name, shapeType=1)
+    w.autoBalance = 1
+
+    w.field('Station', 'C', size=20)
+    w.field('d_East', 'N', decimal=4)
+    w.field('d_North', 'N', decimal=4)
+    w.field('d_Zone', 'N')
+    w.field('d_Ehgt', 'N', decimal=4)
+    w.field('d_Ohgt', 'N', decimal=4)
+    w.field('Bearing', 'N', decimal=1)
+    w.field('Dist', 'N', decimal=4)
+    w.field('d_SD_E', 'N', decimal=4)
+    w.field('d_SD_N', 'N', decimal=4)
+    w.field('d_SD_U', 'N', decimal=4)
+    w.field('Sigma_HPU', 'N', decimal=4)
+    w.field('Sigma_VPU', 'N', decimal=4)
+    w.field('H_within_PU', 'L')
+    w.field('V_within_PU', 'L')
+
+    for s in coord_diffs.values():
+        w.point(stns[s.name].lon.dec(), stns[s.name].lat.dec())
+
+        w.record(
+            s.name,
+            s.d_east, s.d_north, s.d_zone,
+            s.d_ehgt, s.d_ohgt,
+            s.brg, s.dist,
+            s.d_sd_e, s.d_sd_n, s.d_sd_u,
+            s.sigma_hpu, s.sigma_vpu,
+            s.h_within_pu, s.v_within_pu
+        )
+
+    w.close()
+
+
 def check_enter_dir(dir_name):
     """
     Function to check for a directory's existence before creating it (if necessary) and entering it.
@@ -1862,6 +2423,19 @@ def compute_coord_diffs(stn1, stn2):
     dist, az12, az21 = gg.vincinv(stn1.lat.dec(), stn1.lon.dec(), stn2.lat.dec(), stn2.lon.dec())
     d_ohgt = stn2.ohgt - stn1.ohgt
     d_ehgt = stn2.ehgt - stn1.ehgt
+    d_sd_e = stn2.sd_e - stn1.sd_e
+    d_sd_n = stn2.sd_n - stn1.sd_n
+    d_sd_u = stn2.sd_u - stn1.sd_u
+    sigma_hpu = stn1.hpu + stn2.hpu if (stn1.hpu and stn2.hpu) else None
+    sigma_vpu = stn1.vpu + stn2.vpu if (stn1.vpu and stn2.vpu) else None
+
+    # compute if coord changes are within uncertainty bounds
+    h_within_pu = None
+    v_within_pu = None
+    if sigma_hpu:
+        h_within_pu = True if dist <= sigma_hpu else False
+    if sigma_vpu:
+        v_within_pu = True if abs(d_ehgt) <= sigma_vpu else False
 
     return CoordDiff(
         name=stn1.name,
@@ -1871,7 +2445,70 @@ def compute_coord_diffs(stn1, stn2):
         dist=dist,
         brg=az12,
         d_ehgt=d_ehgt,
-        d_ohgt=d_ohgt
+        d_ohgt=d_ohgt,
+        d_sd_e=d_sd_e,
+        d_sd_n=d_sd_n,
+        d_sd_u=d_sd_u,
+        sigma_hpu=sigma_hpu,
+        sigma_vpu=sigma_vpu,
+        h_within_pu=h_within_pu,
+        v_within_pu=v_within_pu
+    )
+
+
+def compute_msr_diffs(msr1, msr2):
+    """
+    Function to compute differences between measurement objects. Ideally, should be
+    called to evalute the performance of a single measurement between two distinct adjustments
+    :param msr1: Measurement object for first measurement
+    :param msr2: Measurement object for second measurement
+    :return: MsrDiff object
+    """
+
+    if msr1.msr_type != msr2.msr_type:
+        raise ValueError(f'msrs must be same type:\n{msr1}\n{msr2}')
+
+    d_msr = [m2 - m1 for m2, m1 in zip(msr2.msr, msr1.msr)] if isinstance(msr1.msr, list) else msr2.msr - msr1.msr
+    d_adj = [m2 - m1 for m2, m1 in zip(msr2.adj, msr1.adj)] if isinstance(msr1.adj, list) else msr2.adj - msr1.adj
+    d_cor = [m2 - m1 for m2, m1 in zip(msr2.cor, msr1.cor)] if isinstance(msr1.cor, list) else msr2.cor - msr1.cor
+    d_msr_sd = [m2 - m1 for m2, m1 in zip(msr2.msr_sd, msr1.msr_sd)] if isinstance(msr1.msr_sd, list) else msr2.msr_sd - msr1.msr_sd
+    d_adj_sd = [m2 - m1 for m2, m1 in zip(msr2.adj_sd, msr1.adj_sd)] if isinstance(msr1.adj_sd, list) else msr2.adj_sd - msr1.adj_sd
+    d_cor_sd = [m2 - m1 for m2, m1 in zip(msr2.cor_sd, msr1.cor_sd)] if isinstance(msr1.cor_sd, list) else msr2.cor_sd - msr1.cor_sd
+    d_nstat = [m2 - m1 for m2, m1 in zip(msr2.nstat, msr1.nstat)] if isinstance(msr1.nstat, list) else msr2.nstat - msr1.nstat
+    # if msr1.tstat and msr2.tstat:
+    #     print(msr1.tstat)
+    #     print(msr2.tstat)
+    #     d_tstat = [m2 - m1 for m2, m1 in zip(msr2.tstat, msr1.tstat)] if isinstance(msr1.tstat, list) else msr2.tstat - msr1.tstat
+    d_pelzer = [m2 - m1 for m2, m1 in zip(msr2.pelzer, msr1.pelzer)] if isinstance(msr1.pelzer,
+                                                                                list) else msr2.pelzer - msr1.pelzer
+    d_pre_adj_cor = [m2 - m1 for m2, m1 in zip(msr2.pre_adj_cor, msr1.pre_adj_cor)] if isinstance(msr1.pre_adj_cor,
+                                                                                   list) else msr2.pre_adj_cor - msr1.pre_adj_cor
+
+    m1_source = msr1.source if msr1.source is not None else ''
+    m2_source = msr2.source if msr2.source is not None else ''
+
+    return MsrDiff(
+        msr_type=msr1.msr_type,
+        stn1=msr1.stn1,
+        stn2=msr1.stn2,
+        stn3=msr1.stn3,
+        ignore=msr1.ignore,
+        cardinal=msr1.cardinal,
+        d_msr=d_msr,
+        d_adj=d_adj,
+        d_cor=d_cor,
+        d_msr_sd=d_msr_sd,
+        d_adj_sd=d_adj_sd,
+        d_cor_sd=d_cor_sd,
+        d_nstat=d_nstat,
+        # d_tstat=d_tstat,
+        d_pelzer=d_pelzer,
+        d_pre_adj_cor=d_pre_adj_cor,
+    #     outlier=outlier,
+        msr_id=msr1.msr_id,
+    #     cluster_id=cluster_id,
+    #     epoch=msr1.epoch,
+        source=f'{m1_source} - {m2_source}',
     )
 
 
@@ -1930,6 +2567,126 @@ def recompute_ohgts(stns, ntv2_file, ntv2_sd_file=None, bicubic_interpolation=Tr
 
     return ohgt_stns
 
+
+def diff_3d(msr):
+    """
+    Function to compute the 3-dimensional difference on a dXYZ/dENU difference triplet
+    :param msr: list-like of msr components
+    :return:
+    """
+    return (msr[0]**2 + msr[1]**2 + msr[2]**2)**0.5
+
+
+def find_cardinal(msrs_list):
+    """
+    function to determine 'cardinal' directions of DynAdjust GNSS measurements
+    :param msrs_list: list of Measurement objects (of common msr_type)
+    :return: string of cardinal directions: enu/XYZ
+    """
+
+    return 'enu' if msrs_list[0].cardinal == ['e', 'n', 'u'] else 'XYZ'
+
+def max_stat(stat_list):
+    """
+    function to determine the maximum absolute value in a list
+    :param stat_list: list of floats
+    :return: maximum value
+    """
+    max_stat = None
+    for s in stat_list:
+        if not max_stat:
+            max_stat = abs(s)
+        elif abs(s) > abs(max_stat):
+            max_stat = abs(s)
+
+    return max_stat
+
+
+def compare_adj(adj_1, adj_2, compare_msrs=False):
+    """
+    Function to compare results of two DynAdjust networks and compute differences in stns, msrs
+
+    Note: the compare_msrs option is not computationally optimised and is therefore not suitable
+          for use on large networks.
+
+    :param network_1: 1st network DynaResults object (treated here as 'old' version of adjustment)
+    :param network_2: 2nd network DynaResults object (treated here as 'new' version of adjustment)
+    :param compare_msrs: True/False. Disable for large adjustments (takes too long)
+    :return:
+    """
+
+    # check reference frame/epoch/geoid models/other configuration options
+    adj_warnings = []
+    if adj_1.adj_metadata.reference_frame != adj_2.adj_metadata.reference_frame:
+        adj_warnings.append(f'Different reference frame: {adj_1.adj_metadata.reference_frame}; {adj_2.adj_metadata.reference_frame}')
+    if adj_1.adj_metadata.epoch != adj_2.adj_metadata.epoch:
+        adj_warnings.append(f'Different epoch: {adj_1.adj_metadata.epoch}; {adj_2.adj_metadata.epoch}')
+    if adj_1.adj_metadata.geoid_model != adj_2.adj_metadata.geoid_model:
+        adj_warnings.append(f'Different geoid model: {adj_1.adj_metadata.geoid_model}; {adj_2.adj_metadata.geoid_model}')
+
+
+    # compare common stns
+    stn_diffs = {}
+    for stn in adj_1.stns.values():
+        if stn.name in adj_2.stns:
+            stn_diffs[stn.name] = compute_coord_diffs(stn, adj_2.stns[stn.name])
+
+    # stns in network_1 missing from network_2
+    stns_removed = {}
+    for stn in adj_1.stns.values():
+        if stn.name not in adj_2.stns:
+            stns_removed[stn.name] = stn
+
+    # stns in network_2 missing from network_1
+    stns_added = {}
+    for stn in adj_2.stns.values():
+        if stn.name not in adj_1.stns:
+            stns_added[stn.name] = stn
+
+    common_msrs = []
+    msrs_added = []
+    msrs_removed = []
+    adj_1_matched_line_refs = set()
+    adj_2_matched_line_refs = set()
+
+    if compare_msrs:
+        # search for msrs in adj_1 missing from adj_2. line reference is used as a unique identifier within
+        # each adjustment.
+        for m_1 in adj_1.msrs:
+
+            # msr is matched where msr type, msr value and stn1, stn2, and stn3 values are similar
+            same_msr = [m_2 for m_2 in adj_2.msrs if m_2.msr_type == m_1.msr_type if m_2.msr == m_1.msr
+                        if m_2.stn1 == m_1.stn1 if m_2.stn2 == m_1.stn2 if m_2.stn3 == m_1.stn3]
+
+            if same_msr:
+                # compare msr where only one is found and not already matched
+                if len(same_msr) == 1:
+                    if same_msr[0].line_ref not in adj_2_matched_line_refs:
+                        common_msrs.append(compute_msr_diffs(msr1=m_1, msr2=same_msr[0]))
+                        adj_1_matched_line_refs.add(m_1.line_ref)
+                        adj_2_matched_line_refs.add(same_msr[0].line_ref)
+
+                else:
+                    # where multiple potential matches exist, take the first that has not already been matched
+                    for m_s in same_msr:
+                        if m_s.line_ref not in adj_2_matched_line_refs:
+                            common_msrs.append(compute_msr_diffs(msr1=m_1, msr2=m_s))
+                            adj_1_matched_line_refs.add(m_1.line_ref)
+                            adj_2_matched_line_refs.add(m_s.line_ref)
+                            break
+
+        # append unmatched msrs to removed msrs list
+        for m_1 in adj_1.msrs:
+            if m_1.line_ref not in adj_1_matched_line_refs:
+                msrs_removed.append(m_1)
+
+        # search for msrs in adj_2 missing from adj_1
+        for m_2 in adj_2.msrs:
+            if m_2.line_ref not in adj_2_matched_line_refs:
+                msrs_added.append(m_2)
+
+
+    return stn_diffs, stns_added, stns_removed, common_msrs, msrs_added, msrs_removed, adj_warnings
 
 # ----------------------------------------------------------------------
 # Example use
