@@ -23,7 +23,7 @@ multi_line_msrs = ('D', ' ', )
 one_stn_msrs = ('H', 'I', 'J', 'P', 'Q', 'R', 'Y')
 two_stn_msrs = ('B', 'C', 'E', 'G', 'K', 'L', 'M', 'S', 'V', 'X', 'Z')
 three_stn_msrs = ('A', 'D')
-angle_msrs = ('A', 'B', 'D', 'V', 'Z', 'P', 'Q')  # angle msr types usually expressed in "DDD MM SS.SSSS" format (not DEC or HP)
+angle_msrs = ('A', 'B', 'D', 'K', 'V', 'Z', 'P', 'Q')  # angle msr types usually expressed in "DDD MM SS.SSSS" format (not DEC or HP)
 hp_msrs = ('I', 'J')
 
 
@@ -618,7 +618,44 @@ class DynaResults(object):
         # sum total at each station
         for stn in self.stn_msr_counts.values():
             stn.sum_msr_counts()
+    
+    
+    def write_adj_xml(self, network_name=None, xml_dir=None, ref_frame=None, epoch = None):
+        
+        full_path =''
+        if self.adj_file:
+            full_path = self.adj_file
+            if not ref_frame:
+                ref_frame = self.adj_metadata.reference_frame
+            if not epoch:
+                epoch = self.adj_metadata.epoch
+        elif self.apu_file:
+            full_path = self.apu_file
+        elif self.xyz_file:
+            full_path = self.xyz_file
+        if network_name :
+            filename = network_name+'.adj.xml'
+        else:
+            filename = os.path.basename(full_path)[:-3]+'adj.xml'
+        
+        # change to shp directory
+        start_dir = os.getcwd()
+        if xml_dir:
+            os.chdir(xml_dir)
+        else:            
+            os.chdir(os.path.dirname(full_path))
+        
+        with open(filename, 'w') as file: 
+            file.write('<?xml version="1.0"?>')
+            file.write(f'<DnaXmlFormat type="Station File" referenceframe="{ref_frame}" epoch="{epoch:%d.%m.%Y}" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="DynaML.xsd">')
+            for stn in self.stns.values():
+                file.write(stn.dynaml_str())
+            file.write('</DnaXmlFormat>')
+            
+        # return to previous active directory
+        os.chdir(start_dir)
 
+        
 
 class CompareAdj():
     def __init__(self, adj_1, adj_2, compare_msr=False):
@@ -855,6 +892,22 @@ class Station(object):
 
     def grid(self):
         return gc.geo2grid(self.lat, self.lon)
+
+    def dynaml_str(self):
+        return (
+            '  <DnaStation>\n' +
+            f'    <Name>{self.name}</Name>\n'+
+            f'    <Constraints>{self.con}</Constraints>\n'+
+            '    <Type>LLh</Type>\n'+
+            '    <StationCoord>\n'+
+            f'      <Name>{self.name}</Name>\n'+
+            f'      <XAxis>{self.lat.hp()}</XAxis>\n'+
+            f'      <YAxis>{self.lon.hp()}</YAxis>\n'+
+            f'      <Height>{self.ehgt}</Height>\n'+
+            '    </StationCoord>\n'+
+            f'    <Description>{self.description}</Description>\n'+
+            '  </DnaStation>\n'
+            )
 
 
 class Switches(object):
@@ -2757,3 +2810,96 @@ if adj_file or apu_file or xyz_file:
                     cov_str = 'Yes' if ru.covariance else 'No'
                 ru_str = f'{ru.stn1:20s} {ru.stn2:20s} {ru.ru_hz:10.4f} {ru.ru_vt:10.4f} {ru.ree_smaj:10.4f} {ru.ree_smin:10.4f} {ru.ree_brg:10.1f} {cov_str:>11s}\n'
                 f.write(ru_str)
+
+
+def best_of_results(adj_files):
+    """
+    Function to compare results of a list DynAdjust adj files and return
+    a DynaResults Object that contains the best Station objects based on the
+    SD(e)     SD(n)    SD(up)
+    
+    Example usage:
+        best = best_of_results([adj_file1, adj_file2])
+        best.write_adj_xml(
+            network_name="Best_of_20241028", 
+            xml_dir= r'C:\Data\Development\Kent.PynAdjust',
+            ref_frame="GDA2020", 
+            epoch = datetime.date(2020,1,1))
+    """
+    
+    best_res = DynaResults()
+    for adj_file in adj_files:
+        dyna_res = DynaResults(adj_file=adj_file)
+        for s, stn in dyna_res.stns.items():
+            if not s in best_res.stns.keys():
+                best_res.stns.update({s:stn})
+            else:
+                stn1 = best_res.stns[s]
+                stn1_2dsd = (stn1.sd_e**2 + stn1.sd_n**2)**0.5
+                stn_2dsd = (stn.sd_e**2 + stn.sd_n**2)**0.5
+                if stn1_2dsd > stn_2dsd:
+                    stn1.lat = stn.lat
+                    stn1.lon = stn.lon
+                    stn1.sd_e = stn.sd_e
+                    stn1.sd_n = stn.sd_n
+                    
+                if stn1.sd_u > stn.sd_u:
+                    stn1.ehgt = stn.ehgt
+                    stn1.ohgt = stn.ohgt
+                    stn1.sd_u = stn.sd_u
+    return best_res
+
+def best_for_initials(prev_nadj, prev_jadjs, current_jadjs, renaming_file=None, threshold = 0.005):
+    """
+    Function to compare results of a list DynAdjust adj files and return
+    a DynaResults Object that contains the best Station objects to used for the
+    initial coordinates. prev_nadj coordinates are best, but current_jadj coordinates
+    are better if they have changed between prev_jadj and current_jadj. renaming 
+    can be applied to the *_jadjs files.
+    
+    Example usage:
+        best = best_for_initials(nadj_file, [adj_file1, adj_file2], [adj_file1, adj_file2])
+        best.write_adj_xml(
+            network_name="Best_of_20241028", 
+            xml_dir= r'C:\Data\Development\Kent.PynAdjust',
+            ref_frame="GDA2020", 
+            epoch = datetime.date(2020,1,1))
+    """
+    renaming_dict={}
+    if renaming_file:
+        with open(renaming_file, 'r') as f:
+            next(f) #skip the header
+            for line in f:
+                to_name = line[:20].strip()
+                fm_name = line[20:].strip()                
+                renaming_dict[fm_name] = to_name
+                
+    best_initials = DynaResults()
+    prev_nadj_res = DynaResults(adj_file=prev_nadj)
+    for prev_jadj, current_jadj in zip(prev_jadjs, current_jadjs):
+        prev_jadj_res = DynaResults(adj_file=prev_jadj)
+        curr_jadj_res = DynaResults(adj_file=current_jadj)
+        stn_diffs, stns_added, _, _, _, _, _ = compare_adj(
+            adj_1 = prev_jadj_res, 
+            adj_2 = curr_jadj_res)
+        for stn_name, coord_diff in stn_diffs.items():
+            if renaming_dict:
+                if stn_name in renaming_dict.keys():
+                    stn_name = renaming_dict[stn_name]
+            if (coord_diff.dist > threshold
+            or coord_diff.d_ohgt > threshold):
+                stn = curr_jadj_res.stns[stn_name]
+                best_initials.stns.update({stn_name:stn})
+            else:
+                if stn_name in prev_nadj_res.stns.keys():
+                    stn = prev_nadj_res.stns[stn_name]
+                    best_initials.stns.update({stn_name:stn})
+                else:
+                    stn = curr_jadj_res.stns[stn_name]
+                    best_initials.stns.update({stn_name:stn})
+        
+        for stn_name, stn in stns_added.items():
+            best_initials.stns.update({stn_name:stn})
+            
+    return best_initials
+
