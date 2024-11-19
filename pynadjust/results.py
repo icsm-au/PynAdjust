@@ -12,6 +12,7 @@ import os
 import re
 import scipy.spatial as sspat
 import warnings
+import xmltodict
 
 # ----------------------------------------------------------------------
 # sets for various msr types
@@ -145,10 +146,11 @@ class MsrDiff():
 
 
 class DynaResults(object):
-    def __init__(self, adj_file=None, xyz_file=None, apu_file=None, stns=None, msrs=None):
+    def __init__(self, adj_file=None, xyz_file=None, apu_file=None, adj_xml_file=None, stns=None, msrs=None, geoid_obj=None):
         self.adj_file = adj_file
         self.apu_file = apu_file
         self.xyz_file = xyz_file
+        self.adj_xml_file = adj_xml_file
         self.stns = stns if stns != None else {}
         self.msrs = msrs if msrs != None else []
         self.adj_metadata = AdjMetadata()
@@ -161,7 +163,7 @@ class DynaResults(object):
         # consume files at initialisation
         self.read_results()
 
-    def read_results(self):
+    def read_results(self, geoid_obj=None):
         """
         Method to consume DynAdjust output files [*.adj, *.apu and *.xyz]
         :return:
@@ -197,6 +199,14 @@ class DynaResults(object):
                 adj_metadata=self.adj_metadata,
                 file_metadata=self.file_metadata,
                 adj_stats=self.adj_stats
+            )
+            
+        if self.adj_xml_file:
+            read_adj_xml_file(
+                adj_xml_file=self.adj_xml_file,
+                stns=self.stns,
+                geoid_obj=geoid_obj,
+                adj_metadata=self.adj_metadata
             )
 
     def link_source_with_msr_id(self, xml_msr_file):
@@ -1543,6 +1553,79 @@ def read_apu_file(apu_file, stns=None, adj_metadata=None, file_metadata=None, ad
     return stns, adj_metadata, file_metadata, adj_stats
 
 
+def read_adj_xml_file(adj_xml_file,stns=None, geoid_obj=None, adj_metadata=None):
+    # initialise kwargs unless args supplied
+    stns = stns if stns != None else {}
+    adj_metadata = adj_metadata if adj_metadata != None else AdjMetadata()
+
+    # convert to pathlib
+    if not isinstance(adj_xml_file, pathlib.Path):
+        adj_xml_file = pathlib.Path(adj_xml_file)
+    
+    with open(adj_xml_file, 'r') as x:
+        xml = xmltodict.parse(x.read())
+        
+    adj_metadata = AdjMetadata(
+        epoch = xml['DnaXmlFormat']['@epoch'],
+        reference_frame = xml['DnaXmlFormat']['@referenceframe']
+        )
+    
+    # don't bother reading stations from file if already present
+    if not stns:
+        for stn in xml['DnaXmlFormat']['DnaStation']:
+            ehgt = None
+            ohgt = None
+            if stn['Type'] =='XYZ':
+                lat, lon, ehgt = gc.xyz2llh(
+                    float(stn['StationCoord']['XAxis']),
+                    float(stn['StationCoord']['YAxis']),
+                    float(stn['StationCoord']['Height']))
+                lat = gc.dec2dms(lat)
+                lon = gc.dec2dms(lon)
+                
+            if stn['Type'].startswith('LL'):
+                lat=gc.hp2dms(float(stn['StationCoord']['XAxis']))
+                lon=gc.hp2dms(float(stn['StationCoord']['YAxis']))
+            
+            if stn['Type'].endswith('H'):
+                ohgt = float(stn['StationCoord']['Height'])
+            if stn['Type'].endswith('h'):
+                ehgt = float(stn['StationCoord']['Height'])
+            
+            if geoid_obj:
+                (n_value,_,_,_) = gntv2.interpolate_ntv2(
+                    grid_object = geoid_obj,
+                    lat=lat.dec(),
+                    lon=lon.dec(),
+                    method='bicubic')
+                if not ehgt:
+                    ehgt = ohgt + n_value
+                if not ohgt:
+                    ohgt = ehgt - n_value
+                
+            stns[stn['Name']] = Station(
+                name=stn['Name'],
+                con=stn['Constraints'],
+                lat=lat,
+                lon=lon,
+                ehgt=ehgt,
+                ohgt=ohgt,
+                sd_e=None,
+                sd_n=None,
+                sd_u=None,
+                description=stn['Description'],
+                hpu=None,
+                vpu=None,
+                smaj=None,
+                smin=None,
+                brg=None,
+                vcv=None,
+                covariances={}
+            )
+
+    return stns, adj_metadata
+
+
 def write_msr_shapefile(stns, msrs, network_name, ref_frame):
     """
     Function to write shapefiles using the adj results. Results are written to a 'Shp' sub-directory.
@@ -2474,11 +2557,11 @@ def compute_coord_diffs(stn1, stn2):
     d_n = north2 - north1
     d_z = zone2 - zone1
     dist, az12, az21 = gg.vincinv(stn1.lat.dec(), stn1.lon.dec(), stn2.lat.dec(), stn2.lon.dec())
-    d_ohgt = stn2.ohgt - stn1.ohgt
-    d_ehgt = stn2.ehgt - stn1.ehgt
-    d_sd_e = stn2.sd_e - stn1.sd_e
-    d_sd_n = stn2.sd_n - stn1.sd_n
-    d_sd_u = stn2.sd_u - stn1.sd_u
+    d_ohgt = stn2.ohgt - stn1.ohgt if (stn1.ohgt and stn2.ohgt) else None
+    d_ehgt = stn2.ehgt - stn1.ehgt if (stn1.ehgt and stn2.ehgt) else None
+    d_sd_e = stn2.sd_e - stn1.sd_e if (stn1.sd_e and stn2.sd_e) else None
+    d_sd_n = stn2.sd_n - stn1.sd_n if (stn1.sd_n and stn2.sd_n) else None
+    d_sd_u = stn2.sd_u - stn1.sd_u if (stn1.sd_u and stn2.sd_u) else None
     sigma_hpu = stn1.hpu + stn2.hpu if (stn1.hpu and stn2.hpu) else None
     sigma_vpu = stn1.vpu + stn2.vpu if (stn1.vpu and stn2.vpu) else None
 
@@ -2812,94 +2895,61 @@ if adj_file or apu_file or xyz_file:
                 f.write(ru_str)
 
 
-def best_of_results(adj_files):
+def best_for_initials(prev_nadj_res, prev_jadjs, next_jadjs, threshold = 0.005):
     """
-    Function to compare results of a list DynAdjust adj files and return
-    a DynaResults Object that contains the best Station objects based on the
-    SD(e)     SD(n)    SD(up)
-    
-    Example usage:
-        best = best_of_results([adj_file1, adj_file2])
-        best.write_adj_xml(
-            network_name="Best_of_20241028", 
-            xml_dir= r'C:\Data\Development\Kent.PynAdjust',
-            ref_frame="GDA2020", 
-            epoch = datetime.date(2020,1,1))
-    """
-    
-    best_res = DynaResults()
-    for adj_file in adj_files:
-        dyna_res = DynaResults(adj_file=adj_file)
-        for s, stn in dyna_res.stns.items():
-            if not s in best_res.stns.keys():
-                best_res.stns.update({s:stn})
-            else:
-                stn1 = best_res.stns[s]
-                stn1_2dsd = (stn1.sd_e**2 + stn1.sd_n**2)**0.5
-                stn_2dsd = (stn.sd_e**2 + stn.sd_n**2)**0.5
-                if stn1_2dsd > stn_2dsd:
-                    stn1.lat = stn.lat
-                    stn1.lon = stn.lon
-                    stn1.sd_e = stn.sd_e
-                    stn1.sd_n = stn.sd_n
-                    
-                if stn1.sd_u > stn.sd_u:
-                    stn1.ehgt = stn.ehgt
-                    stn1.ohgt = stn.ohgt
-                    stn1.sd_u = stn.sd_u
-    return best_res
-
-def best_for_initials(prev_nadj, prev_jadjs, current_jadjs, renaming_file=None, threshold = 0.005):
-    """
-    Function to compare results of a list DynAdjust adj files and return
+    Function to compare results of a list DynaResults objects and return
     a DynaResults Object that contains the best Station objects to used for the
     initial coordinates. prev_nadj coordinates are best, but current_jadj coordinates
-    are better if they have changed between prev_jadj and current_jadj. renaming 
-    can be applied to the *_jadjs files.
+    are better if they have changed between prev_jadj and next_jadj.
     
     Example usage:
-        best = best_for_initials(nadj_file, [adj_file1, adj_file2], [adj_file1, adj_file2])
+        best = best_for_initials(nadj_res, [adj_res1, adj_res2], [adj_res1, adj_res2])
         best.write_adj_xml(
             network_name="Best_of_20241028", 
             xml_dir= r'C:\Data\Development\Kent.PynAdjust',
             ref_frame="GDA2020", 
             epoch = datetime.date(2020,1,1))
-    """
-    renaming_dict={}
-    if renaming_file:
-        with open(renaming_file, 'r') as f:
-            next(f) #skip the header
-            for line in f:
-                to_name = line[:20].strip()
-                fm_name = line[20:].strip()                
-                renaming_dict[fm_name] = to_name
-                
+    """                
     best_initials = DynaResults()
-    prev_nadj_res = DynaResults(adj_file=prev_nadj)
-    for prev_jadj, current_jadj in zip(prev_jadjs, current_jadjs):
-        prev_jadj_res = DynaResults(adj_file=prev_jadj)
-        curr_jadj_res = DynaResults(adj_file=current_jadj)
-        stn_diffs, stns_added, _, _, _, _, _ = compare_adj(
-            adj_1 = prev_jadj_res, 
-            adj_2 = curr_jadj_res)
-        for stn_name, coord_diff in stn_diffs.items():
-            if renaming_dict:
-                if stn_name in renaming_dict.keys():
-                    stn_name = renaming_dict[stn_name]
-            if (coord_diff.dist > threshold
-            or coord_diff.d_ohgt > threshold):
-                stn = curr_jadj_res.stns[stn_name]
-                best_initials.stns.update({stn_name:stn})
-            else:
-                if stn_name in prev_nadj_res.stns.keys():
-                    stn = prev_nadj_res.stns[stn_name]
-                    best_initials.stns.update({stn_name:stn})
-                else:
-                    stn = curr_jadj_res.stns[stn_name]
-                    best_initials.stns.update({stn_name:stn})
-        
-        for stn_name, stn in stns_added.items():
+    summary_rep = []        
+    for stn_name, stn in prev_nadj_res.stns.items():
+        adopted_stn = None
+        # check the list of jadj's for the stn_name
+        for prev_jadj_res, next_jadj_res in zip(prev_jadjs, next_jadjs):
+            if stn_name in prev_jadj_res.stns and stn_name in next_jadj_res.stns:
+                stn1=prev_jadj_res.stns[stn_name]
+                stn2=next_jadj_res.stns[stn_name]
+                coords_diff = compute_coord_diffs(stn1, stn2)
+                
+                if coords_diff.dist > threshold:
+                    adopted_stn = stn2
+                    summary_rep.append(stn_name + " dist: " + str(coords_diff.dist))
+                
+                # check that heights exist before using comparison
+                elif stn1.ohgt and stn2.ohgt:
+                    if abs(coords_diff.d_ohgt) > threshold:
+                        adopted_stn = stn2
+                        summary_rep.append(stn_name + " ohgt: " + str(coords_diff.d_ohgt))
+                        
+                elif stn1.ehgt and stn2.ehgt:
+                    if abs(coords_diff.d_ehgt) > threshold:
+                        adopted_stn = stn2
+                        summary_rep.append(stn_name + " ehgt: " + str(coords_diff.d_ehgt))
+        #Adopt the changed coordinate from jadj or use previous nadj
+        if adopted_stn:
+            best_initials.stns.update({stn_name:adopted_stn})
+        else:
             best_initials.stns.update({stn_name:stn})
-            
+        
+    # find added stations
+    diff_keys = set(next_jadj_res.stns.keys()) - set(prev_nadj_res.stns.keys())
+    for k in diff_keys:
+        best_initials.stns[k] = next_jadj_res.stns[k]
+                
+    if len(summary_rep) > 0:
+        print(f"The following station coordinates exceeded the threshold of {threshold} and have been adopted from jadj file")
+        for  s in summary_rep: print (s)
+        
     return best_initials
+
 
