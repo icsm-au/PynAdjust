@@ -12,6 +12,7 @@ import os
 import re
 import scipy.spatial as sspat
 import warnings
+import xmltodict
 
 # ----------------------------------------------------------------------
 # sets for various msr types
@@ -23,7 +24,7 @@ multi_line_msrs = ('D', ' ', )
 one_stn_msrs = ('H', 'I', 'J', 'P', 'Q', 'R', 'Y')
 two_stn_msrs = ('B', 'C', 'E', 'G', 'K', 'L', 'M', 'S', 'V', 'X', 'Z')
 three_stn_msrs = ('A', 'D')
-angle_msrs = ('A', 'B', 'D', 'V', 'Z', 'P', 'Q')  # angle msr types usually expressed in "DDD MM SS.SSSS" format (not DEC or HP)
+angle_msrs = ('A', 'B', 'D', 'K', 'V', 'Z', 'P', 'Q')  # angle msr types usually expressed in "DDD MM SS.SSSS" format (not DEC or HP)
 hp_msrs = ('I', 'J')
 
 
@@ -145,10 +146,11 @@ class MsrDiff():
 
 
 class DynaResults(object):
-    def __init__(self, adj_file=None, xyz_file=None, apu_file=None, stns=None, msrs=None):
+    def __init__(self, adj_file=None, xyz_file=None, apu_file=None, adj_xml_file=None, stns=None, msrs=None, geoid_obj=None):
         self.adj_file = adj_file
         self.apu_file = apu_file
         self.xyz_file = xyz_file
+        self.adj_xml_file = adj_xml_file
         self.stns = stns if stns != None else {}
         self.msrs = msrs if msrs != None else []
         self.adj_metadata = AdjMetadata()
@@ -161,7 +163,7 @@ class DynaResults(object):
         # consume files at initialisation
         self.read_results()
 
-    def read_results(self):
+    def read_results(self, geoid_obj=None):
         """
         Method to consume DynAdjust output files [*.adj, *.apu and *.xyz]
         :return:
@@ -197,6 +199,14 @@ class DynaResults(object):
                 adj_metadata=self.adj_metadata,
                 file_metadata=self.file_metadata,
                 adj_stats=self.adj_stats
+            )
+            
+        if self.adj_xml_file:
+            read_adj_xml_file(
+                adj_xml_file=self.adj_xml_file,
+                stns=self.stns,
+                geoid_obj=geoid_obj,
+                adj_metadata=self.adj_metadata
             )
 
     def link_source_with_msr_id(self, xml_msr_file):
@@ -618,7 +628,44 @@ class DynaResults(object):
         # sum total at each station
         for stn in self.stn_msr_counts.values():
             stn.sum_msr_counts()
+    
+    
+    def write_adj_xml(self, network_name=None, xml_dir=None, ref_frame=None, epoch = None):
+        
+        full_path =''
+        if self.adj_file:
+            full_path = self.adj_file
+            if not ref_frame:
+                ref_frame = self.adj_metadata.reference_frame
+            if not epoch:
+                epoch = self.adj_metadata.epoch
+        elif self.apu_file:
+            full_path = self.apu_file
+        elif self.xyz_file:
+            full_path = self.xyz_file
+        if network_name :
+            filename = network_name+'.adj.xml'
+        else:
+            filename = os.path.basename(full_path)[:-3]+'adj.xml'
+        
+        # change to shp directory
+        start_dir = os.getcwd()
+        if xml_dir:
+            os.chdir(xml_dir)
+        else:            
+            os.chdir(os.path.dirname(full_path))
+        
+        with open(filename, 'w') as file: 
+            file.write('<?xml version="1.0"?>')
+            file.write(f'<DnaXmlFormat type="Station File" referenceframe="{ref_frame}" epoch="{epoch:%d.%m.%Y}" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="DynaML.xsd">')
+            for stn in self.stns.values():
+                file.write(stn.dynaml_str())
+            file.write('</DnaXmlFormat>')
+            
+        # return to previous active directory
+        os.chdir(start_dir)
 
+        
 
 class CompareAdj():
     def __init__(self, adj_1, adj_2, compare_msr=False):
@@ -855,6 +902,22 @@ class Station(object):
 
     def grid(self):
         return gc.geo2grid(self.lat, self.lon)
+
+    def dynaml_str(self):
+        return (
+            '  <DnaStation>\n' +
+            f'    <Name>{self.name}</Name>\n'+
+            f'    <Constraints>{self.con}</Constraints>\n'+
+            '    <Type>LLh</Type>\n'+
+            '    <StationCoord>\n'+
+            f'      <Name>{self.name}</Name>\n'+
+            f'      <XAxis>{self.lat.hp()}</XAxis>\n'+
+            f'      <YAxis>{self.lon.hp()}</YAxis>\n'+
+            f'      <Height>{self.ehgt}</Height>\n'+
+            '    </StationCoord>\n'+
+            f'    <Description>{self.description}</Description>\n'+
+            '  </DnaStation>\n'
+            )
 
 
 class Switches(object):
@@ -1488,6 +1551,79 @@ def read_apu_file(apu_file, stns=None, adj_metadata=None, file_metadata=None, ad
                                 stns[stn].covariances[cov_stn] = cov
 
     return stns, adj_metadata, file_metadata, adj_stats
+
+
+def read_adj_xml_file(adj_xml_file,stns=None, geoid_obj=None, adj_metadata=None):
+    # initialise kwargs unless args supplied
+    stns = stns if stns != None else {}
+    adj_metadata = adj_metadata if adj_metadata != None else AdjMetadata()
+
+    # convert to pathlib
+    if not isinstance(adj_xml_file, pathlib.Path):
+        adj_xml_file = pathlib.Path(adj_xml_file)
+    
+    with open(adj_xml_file, 'r') as x:
+        xml = xmltodict.parse(x.read())
+        
+    adj_metadata = AdjMetadata(
+        epoch = xml['DnaXmlFormat']['@epoch'],
+        reference_frame = xml['DnaXmlFormat']['@referenceframe']
+        )
+    
+    # don't bother reading stations from file if already present
+    if not stns:
+        for stn in xml['DnaXmlFormat']['DnaStation']:
+            ehgt = None
+            ohgt = None
+            if stn['Type'] =='XYZ':
+                lat, lon, ehgt = gc.xyz2llh(
+                    float(stn['StationCoord']['XAxis']),
+                    float(stn['StationCoord']['YAxis']),
+                    float(stn['StationCoord']['Height']))
+                lat = gc.dec2dms(lat)
+                lon = gc.dec2dms(lon)
+                
+            if stn['Type'].startswith('LL'):
+                lat=gc.hp2dms(float(stn['StationCoord']['XAxis']))
+                lon=gc.hp2dms(float(stn['StationCoord']['YAxis']))
+            
+            if stn['Type'].endswith('H'):
+                ohgt = float(stn['StationCoord']['Height'])
+            if stn['Type'].endswith('h'):
+                ehgt = float(stn['StationCoord']['Height'])
+            
+            if geoid_obj:
+                (n_value,_,_,_) = gntv2.interpolate_ntv2(
+                    grid_object = geoid_obj,
+                    lat=lat.dec(),
+                    lon=lon.dec(),
+                    method='bicubic')
+                if not ehgt:
+                    ehgt = ohgt + n_value
+                if not ohgt:
+                    ohgt = ehgt - n_value
+                
+            stns[stn['Name']] = Station(
+                name=stn['Name'],
+                con=stn['Constraints'],
+                lat=lat,
+                lon=lon,
+                ehgt=ehgt,
+                ohgt=ohgt,
+                sd_e=None,
+                sd_n=None,
+                sd_u=None,
+                description=stn['Description'],
+                hpu=None,
+                vpu=None,
+                smaj=None,
+                smin=None,
+                brg=None,
+                vcv=None,
+                covariances={}
+            )
+
+    return stns, adj_metadata
 
 
 def write_msr_shapefile(stns, msrs, network_name, ref_frame):
@@ -2421,11 +2557,11 @@ def compute_coord_diffs(stn1, stn2):
     d_n = north2 - north1
     d_z = zone2 - zone1
     dist, az12, az21 = gg.vincinv(stn1.lat.dec(), stn1.lon.dec(), stn2.lat.dec(), stn2.lon.dec())
-    d_ohgt = stn2.ohgt - stn1.ohgt
-    d_ehgt = stn2.ehgt - stn1.ehgt
-    d_sd_e = stn2.sd_e - stn1.sd_e
-    d_sd_n = stn2.sd_n - stn1.sd_n
-    d_sd_u = stn2.sd_u - stn1.sd_u
+    d_ohgt = stn2.ohgt - stn1.ohgt if (stn1.ohgt and stn2.ohgt) else None
+    d_ehgt = stn2.ehgt - stn1.ehgt if (stn1.ehgt and stn2.ehgt) else None
+    d_sd_e = stn2.sd_e - stn1.sd_e if (stn1.sd_e and stn2.sd_e) else None
+    d_sd_n = stn2.sd_n - stn1.sd_n if (stn1.sd_n and stn2.sd_n) else None
+    d_sd_u = stn2.sd_u - stn1.sd_u if (stn1.sd_u and stn2.sd_u) else None
     sigma_hpu = stn1.hpu + stn2.hpu if (stn1.hpu and stn2.hpu) else None
     sigma_vpu = stn1.vpu + stn2.vpu if (stn1.vpu and stn2.vpu) else None
 
@@ -2757,3 +2893,63 @@ if adj_file or apu_file or xyz_file:
                     cov_str = 'Yes' if ru.covariance else 'No'
                 ru_str = f'{ru.stn1:20s} {ru.stn2:20s} {ru.ru_hz:10.4f} {ru.ru_vt:10.4f} {ru.ree_smaj:10.4f} {ru.ree_smin:10.4f} {ru.ree_brg:10.1f} {cov_str:>11s}\n'
                 f.write(ru_str)
+
+
+def best_for_initials(prev_nadj_res, prev_jadjs, next_jadjs, threshold = 0.005):
+    """
+    Function to compare results of a list DynaResults objects and return
+    a DynaResults Object that contains the best Station objects to used for the
+    initial coordinates. prev_nadj coordinates are best, but current_jadj coordinates
+    are better if they have changed between prev_jadj and next_jadj.
+    
+    Example usage:
+        best = best_for_initials(nadj_res, [adj_res1, adj_res2], [adj_res1, adj_res2])
+        best.write_adj_xml(
+            network_name="Best_of_20241028", 
+            xml_dir= r'C:\Data\Development\Kent.PynAdjust',
+            ref_frame="GDA2020", 
+            epoch = datetime.date(2020,1,1))
+    """                
+    best_initials = DynaResults()
+    summary_rep = []        
+    for stn_name, stn in prev_nadj_res.stns.items():
+        adopted_stn = None
+        # check the list of jadj's for the stn_name
+        for prev_jadj_res, next_jadj_res in zip(prev_jadjs, next_jadjs):
+            if stn_name in prev_jadj_res.stns and stn_name in next_jadj_res.stns:
+                stn1=prev_jadj_res.stns[stn_name]
+                stn2=next_jadj_res.stns[stn_name]
+                coords_diff = compute_coord_diffs(stn1, stn2)
+                
+                if coords_diff.dist > threshold:
+                    adopted_stn = stn2
+                    summary_rep.append(stn_name + " dist: " + str(coords_diff.dist))
+                
+                # check that heights exist before using comparison
+                elif stn1.ohgt and stn2.ohgt:
+                    if abs(coords_diff.d_ohgt) > threshold:
+                        adopted_stn = stn2
+                        summary_rep.append(stn_name + " ohgt: " + str(coords_diff.d_ohgt))
+                        
+                elif stn1.ehgt and stn2.ehgt:
+                    if abs(coords_diff.d_ehgt) > threshold:
+                        adopted_stn = stn2
+                        summary_rep.append(stn_name + " ehgt: " + str(coords_diff.d_ehgt))
+        #Adopt the changed coordinate from jadj or use previous nadj
+        if adopted_stn:
+            best_initials.stns.update({stn_name:adopted_stn})
+        else:
+            best_initials.stns.update({stn_name:stn})
+        
+    # find added stations
+    diff_keys = set(next_jadj_res.stns.keys()) - set(prev_nadj_res.stns.keys())
+    for k in diff_keys:
+        best_initials.stns[k] = next_jadj_res.stns[k]
+                
+    if len(summary_rep) > 0:
+        print(f"The following station coordinates exceeded the threshold of {threshold} and have been adopted from jadj file")
+        for  s in summary_rep: print (s)
+        
+    return best_initials
+
+
